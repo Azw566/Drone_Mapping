@@ -1,0 +1,27 @@
+lio_sam:
+  ros__parameters:
+    use_sim_time: true
+
+    # frames (must match TF)
+    lidarFrame: "lidar_link"
+    baselinkFrame: "base_link"
+    odomFrame: "odom"
+    mapFrame: "map"
+    imuFrame: "imu_link"
+
+    # sensor model
+    sensor: "velodyne"
+    N_SCAN: 16
+    Horizon_SCAN: 1800
+
+    # topics (relative; namespace prefixes them)
+    pointCloudTopic: "points_adapted"
+    imuTopic: "imu/data_adapted"
+
+    # extrinsics: LiDAR 0.12 m above IMU (adjust if model differs)
+    extrinsicRot: [1, 0, 0,
+                   0, 1, 0,
+                   0, 0, 1]
+    extrinsicTrans: [0.0, 0.0, -0.12]
+
+    loopClosureEnableFlag: true

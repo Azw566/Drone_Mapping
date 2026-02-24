@@ -54,3 +54,28 @@
   ros_type_name: "sensor_msgs/msg/Imu"
   gz_type_name: "gz.msgs.IMU"
   direction: GZ_TO_ROS
+
+# Odometry / pose for navigation stacks
+- ros_topic_name: "/d1/odom"
+  gz_topic_name: "/model/x500_d1/odometry"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "gz.msgs.Odometry"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/d1/pose"
+  gz_topic_name: "/model/x500_d1/pose"
+  ros_type_name: "geometry_msgs/msg/PoseStamped"
+  gz_type_name: "gz.msgs.Pose"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/d2/odom"
+  gz_topic_name: "/model/x500_d2/odometry"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "gz.msgs.Odometry"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/d2/pose"
+  gz_topic_name: "/model/x500_d2/pose"
+  ros_type_name: "geometry_msgs/msg/PoseStamped"
+  gz_type_name: "gz.msgs.Pose"
+  direction: GZ_TO_ROS

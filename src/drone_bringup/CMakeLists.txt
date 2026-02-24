@@ -18,4 +18,10 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}/
 )
 
+# Install Python utilities/nodes
+install(PROGRAMS
+  scripts/lidar_enricher.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()

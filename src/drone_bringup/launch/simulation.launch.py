@@ -57,7 +57,7 @@ def generate_launch_description():
             '--reptype', 'gz.msgs.Boolean',
             '--timeout', '5000',
             '--req', (
-                f'sdf_filename: "{os.path.join(model_path, "x500_vision_lidar", "model.sdf")}", '
+                'uri: "model://x500_vision_lidar", '
                 'name: "x500_d1", '
                 'pose: {position: {x: 1.5, y: -8, z: 0.5}}'
             ),
@@ -77,7 +77,7 @@ def generate_launch_description():
                     '--reptype', 'gz.msgs.Boolean',
                     '--timeout', '5000',
                     '--req', (
-                        f'sdf_filename: "{os.path.join(model_path, "x500_vision_lidar", "model.sdf")}", '
+                        'uri: "model://x500_vision_lidar", '
                         'name: "x500_d2", '
                         'pose: {position: {x: -1.5, y: -8, z: 0.5}}'
                     ),
