@@ -30,8 +30,9 @@ def generate_launch_description():
 
     world_file = os.path.join(pkg_dir, 'worlds', 'maze.sdf')
     model_path = os.path.join(pkg_dir, 'models')
-    urdf_file = os.path.join(pkg_dir, 'models', 'x500_lidar_cam', 'model.urdf.xacro')
+    urdf_file = os.path.join(pkg_dir, 'models', 'x500_vision_lidar', 'model.urdf.xacro')
     rviz_config = os.path.join(pkg_dir, 'rviz', 'multi_drone.rviz')
+    bridge_config = os.path.join(pkg_dir, 'config', 'bridge.yaml')
 
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz', default_value='true',
@@ -87,48 +88,14 @@ def generate_launch_description():
     )
 
 
-    def create_bridge_node(drone_name, drone_ns):
-        return Node(
-            package='ros_gz_bridge',
-            executable='parameter_bridge',
-            namespace=drone_ns,
-            name=f'{drone_ns}_bridge',
-            arguments=[
-                # LiDAR: Gazebo PointCloud → ROS2 PointCloud2
-                f'/world/warehouse/model/{drone_name}/link/lidar_link/sensor/velodyne_vlp16/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
-
-                # Camera image: Gazebo Image → ROS2 Image
-                f'/world/warehouse/model/{drone_name}/link/camera_link/sensor/rgb_camera/image@sensor_msgs/msg/Image[gz.msgs.Image',
-
-                # Camera info: Gazebo CameraInfo → ROS2 CameraInfo
-                # Contains intrinsic matrix (focal length, principal point)
-                # needed by ArUco's solvePnP for 3D pose estimation
-                f'/world/warehouse/model/{drone_name}/link/camera_link/sensor/rgb_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
-
-                # IMU: Gazebo IMU → ROS2 IMU
-                f'/world/warehouse/model/{drone_name}/link/imu_link/sensor/imu_sensor/imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
-            ],
-            # REMAPPING: The Gazebo topic names are very long (full model path).
-            # We remap them to clean, short names in the drone's namespace.
-            # After remapping, other nodes subscribe to /d1/points_raw, /d1/camera/image_raw, etc.
-            remappings=[
-                (f'/world/warehouse/model/{drone_name}/link/lidar_link/sensor/velodyne_vlp16/scan/points',
-                 f'/{drone_ns}/points_raw'),
-
-                (f'/world/warehouse/model/{drone_name}/link/camera_link/sensor/rgb_camera/image',
-                 f'/{drone_ns}/camera/image_raw'),
-
-                (f'/world/warehouse/model/{drone_name}/link/camera_link/sensor/rgb_camera/camera_info',
-                 f'/{drone_ns}/camera/camera_info'),
-
-                (f'/world/warehouse/model/{drone_name}/link/imu_link/sensor/imu_sensor/imu',
-                 f'/{drone_ns}/imu/data'),
-            ],
-            output='screen',
-        )
-
-    bridge_d1 = create_bridge_node('x500_d1', 'd1')
-    bridge_d2 = create_bridge_node('x500_d2', 'd2')
+    # Single bridge configured via YAML to avoid magnetometer / barometer topics.
+    bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='gz_bridge',
+        parameters=[{'config_file': bridge_config}],
+        output='screen',
+    )
 
 
     def create_robot_state_publisher(drone_ns):
@@ -175,8 +142,8 @@ def generate_launch_description():
         # Wait for Gazebo to initialize before spawning
         TimerAction(period=5.0, actions=[drone1_spawn]),
         TimerAction(period=7.0, actions=[drone2_spawn]),
-        # Wait for models to spawn before starting bridges
-        TimerAction(period=8.0, actions=[bridge_d1, bridge_d2]),
+        # Wait for models to spawn before starting bridge
+        TimerAction(period=8.0, actions=[bridge]),
         TimerAction(period=8.0, actions=[rsp_d1, rsp_d2]),
         rviz,
     ])

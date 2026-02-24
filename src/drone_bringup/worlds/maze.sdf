@@ -530,11 +530,12 @@
             <box><size>0.3 0.3 0.002</size></box>
           </geometry>
           <material>
-            <script>
-              <uri>model://aruco_marker/materials/scripts</uri>
-              <uri>model://aruco_marker/materials/textures</uri>
-              <name>ArUcoMarker/Marker0</name>
-            </script>
+            <diffuse>1 1 1 1</diffuse>
+            <pbr>
+              <metal>
+                <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_0.png</albedo_map>
+              </metal>
+            </pbr>
           </material>
         </visual>
       </link>
@@ -550,11 +551,12 @@
             <box><size>0.3 0.3 0.002</size></box>
           </geometry>
           <material>
-            <script>
-              <uri>model://aruco_marker/materials/scripts</uri>
-              <uri>model://aruco_marker/materials/textures</uri>
-              <name>ArUcoMarker/Marker1</name>
-            </script>
+            <diffuse>1 1 1 1</diffuse>
+            <pbr>
+              <metal>
+                <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_1.png</albedo_map>
+              </metal>
+            </pbr>
           </material>
         </visual>
       </link>
@@ -570,11 +572,12 @@
             <box><size>0.3 0.3 0.002</size></box>
           </geometry>
           <material>
-            <script>
-              <uri>model://aruco_marker/materials/scripts</uri>
-              <uri>model://aruco_marker/materials/textures</uri>
-              <name>ArUcoMarker/Marker2</name>
-            </script>
+            <diffuse>1 1 1 1</diffuse>
+            <pbr>
+              <metal>
+                <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_2.png</albedo_map>
+              </metal>
+            </pbr>
           </material>
         </visual>
       </link>
@@ -590,11 +593,12 @@
             <box><size>0.3 0.3 0.002</size></box>
           </geometry>
           <material>
-            <script>
-              <uri>model://aruco_marker/materials/scripts</uri>
-              <uri>model://aruco_marker/materials/textures</uri>
-              <name>ArUcoMarker/Marker3</name>
-            </script>
+            <diffuse>1 1 1 1</diffuse>
+            <pbr>
+              <metal>
+                <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_3.png</albedo_map>
+              </metal>
+            </pbr>
           </material>
         </visual>
       </link>
@@ -610,112 +614,17 @@
             <box><size>0.3 0.3 0.002</size></box>
           </geometry>
           <material>
-            <script>
-              <uri>model://aruco_marker/materials/scripts</uri>
-              <uri>model://aruco_marker/materials/textures</uri>
-              <name>ArUcoMarker/Marker4</name>
-            </script>
+            <diffuse>1 1 1 1</diffuse>
+            <pbr>
+              <metal>
+                <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_4.png</albedo_map>
+              </metal>
+            </pbr>
           </material>
         </visual>
       </link>
     </model>
 
-    <!-- ==================== VISUAL REFERENCE MARKERS ==================== -->
-
-    <model name="victim_marker_0">
-      <static>true</static>
-      <pose>-7.5 -7.5 0.005 0 0 0</pose>
-      <link name="link">
-        <visual name="visual">
-          <geometry>
-            <cylinder>
-              <radius>0.5</radius>
-              <length>0.01</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.8 0 0 1</ambient>
-            <diffuse>1 0.2 0.2 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
-    <model name="victim_marker_1">
-      <static>true</static>
-      <pose>7.5 -7.5 0.005 0 0 0</pose>
-      <link name="link">
-        <visual name="visual">
-          <geometry>
-            <cylinder>
-              <radius>0.5</radius>
-              <length>0.01</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.8 0 0 1</ambient>
-            <diffuse>1 0.2 0.2 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
-    <model name="victim_marker_2">
-      <static>true</static>
-      <pose>-7.5 7.5 0.005 0 0 0</pose>
-      <link name="link">
-        <visual name="visual">
-          <geometry>
-            <cylinder>
-              <radius>0.5</radius>
-              <length>0.01</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.8 0 0 1</ambient>
-            <diffuse>1 0.2 0.2 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
-    <model name="victim_marker_3">
-      <static>true</static>
-      <pose>7.5 7.5 0.005 0 0 0</pose>
-      <link name="link">
-        <visual name="visual">
-          <geometry>
-            <cylinder>
-              <radius>0.5</radius>
-              <length>0.01</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.8 0 0 1</ambient>
-            <diffuse>1 0.2 0.2 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
-    <model name="victim_marker_4">
-      <static>true</static>
-      <pose>-2.5 2.5 0.005 0 0 0</pose>
-      <link name="link">
-        <visual name="visual">
-          <geometry>
-            <cylinder>
-              <radius>0.5</radius>
-              <length>0.01</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.8 0 0 1</ambient>
-            <diffuse>1 0.2 0.2 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
 
   </world>
 </sdf>

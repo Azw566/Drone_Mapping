@@ -1,0 +1,56 @@
+# ros_gz_bridge parameter_bridge configuration
+# Only bridge the topics we actually need (no magnetometer or air-pressure).
+# Usage:
+#   ros2 run ros_gz_bridge parameter_bridge --ros-args -p config_file:=${THIS_FILE_PATH}
+#
+# Notes:
+# - GZ topics are fully qualified; keep them in sync with your world/model names.
+# - Direction options: BIDIRECTIONAL, GZ_TO_ROS, ROS_TO_GZ.
+
+- ros_topic_name: "/d1/points_raw"
+  gz_topic_name: "/world/maze/model/x500_d1/link/lidar_link/sensor/velodyne_vlp16/scan/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/d1/camera/image_raw"
+  gz_topic_name: "/world/maze/model/x500_d1/link/camera_link/sensor/rgb_camera/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/d1/camera/camera_info"
+  gz_topic_name: "/world/maze/model/x500_d1/link/camera_link/sensor/rgb_camera/camera_info"
+  ros_type_name: "sensor_msgs/msg/CameraInfo"
+  gz_type_name: "gz.msgs.CameraInfo"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/d1/imu/data"
+  gz_topic_name: "/world/maze/model/x500_d1/link/imu_link/sensor/imu_sensor/imu"
+  ros_type_name: "sensor_msgs/msg/Imu"
+  gz_type_name: "gz.msgs.IMU"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/d2/points_raw"
+  gz_topic_name: "/world/maze/model/x500_d2/link/lidar_link/sensor/velodyne_vlp16/scan/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/d2/camera/image_raw"
+  gz_topic_name: "/world/maze/model/x500_d2/link/camera_link/sensor/rgb_camera/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/d2/camera/camera_info"
+  gz_topic_name: "/world/maze/model/x500_d2/link/camera_link/sensor/rgb_camera/camera_info"
+  ros_type_name: "sensor_msgs/msg/CameraInfo"
+  gz_type_name: "gz.msgs.CameraInfo"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/d2/imu/data"
+  gz_topic_name: "/world/maze/model/x500_d2/link/imu_link/sensor/imu_sensor/imu"
+  ros_type_name: "sensor_msgs/msg/Imu"
+  gz_type_name: "gz.msgs.IMU"
+  direction: GZ_TO_ROS
