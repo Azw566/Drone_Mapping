@@ -1,0 +1,58 @@
+# exploration_params.yaml
+#
+# Parameters for frontier-based exploration.
+# These control how drones decide WHERE to explore next.
+#
+# TUNING GUIDE:
+# ═════════════
+# Exploration too slow?   → Decrease min_frontier_size, increase distance_weight
+# Drone revisits areas?   → Increase information_gain_weight
+# Drones too close?       → Increase safety_radius
+# Exploration ends early? → Decrease min_frontier_size
+
+exploration:
+  ros__parameters:
+
+    # ─── FRONTIER DETECTION ───
+    # A frontier is a boundary cell between FREE and UNKNOWN space.
+    # We cluster adjacent frontier cells and only consider clusters
+    # above a minimum size (to ignore tiny cracks and noise).
+
+    min_frontier_size: 10        # Minimum cells in a cluster to be a valid frontier.
+                                  # At 0.1m resolution, 10 cells ≈ 1m of unexplored boundary.
+                                  # Smaller = explores more thoroughly but slower.
+
+    frontier_detection_rate: 2.0  # Hz — how often to re-scan the map for frontiers.
+                                  # Higher = more responsive but more CPU.
+
+    # ─── GOAL SELECTION ───
+    # Each frontier is scored: score = gain_weight * size - cost_weight * distance
+    # The frontier with the highest score is selected as the next goal.
+
+    information_gain_weight: 1.0  # How much to value large frontiers (more to discover)
+    distance_weight: 0.3          # How much to penalize far-away frontiers (travel cost)
+    direction_weight: 0.1         # Bonus for frontiers in the current direction of travel
+                                  # (reduces zigzagging)
+
+    # ─── FLIGHT PARAMETERS ───
+    flight_altitude: 2.0          # meters — default cruise altitude
+                                  # Must be above shelves (~3m) or between them (~1.5m)
+                                  # 2m is a good compromise: above crates, below ceiling
+
+    max_velocity: 1.5             # m/s — maximum horizontal speed
+                                  # Slower = better SLAM (more overlap between scans)
+                                  # Faster = covers more area but risks SLAM drift
+
+    goal_tolerance: 0.5           # meters — "close enough" to a goal to mark it reached
+    waypoint_spacing: 2.0         # meters — intermediate waypoints along path
+
+    # ─── MULTI-DRONE COORDINATION ───
+    safety_radius: 3.0            # meters — minimum distance between drones
+                                  # If another drone enters this radius, hold position
+    overlap_penalty: 5.0          # Score penalty for frontiers near the other drone's goal
+                                  # Prevents both drones going to the same area
+
+    # ─── TERMINATION ───
+    exploration_complete_threshold: 0.95  # Stop when 95% of reachable space is mapped
+    idle_timeout: 30.0                     # seconds — if no new frontiers for this long,
+                                           # declare exploration complete

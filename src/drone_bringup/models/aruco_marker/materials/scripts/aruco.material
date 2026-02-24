@@ -1,0 +1,141 @@
+// ArUco Marker Materials - IDs 0-9
+
+material ArUcoMarker/Marker0
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture marker_0.png
+      }
+    }
+  }
+}
+
+material ArUcoMarker/Marker1
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture marker_1.png
+      }
+    }
+  }
+}
+
+material ArUcoMarker/Marker2
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture marker_2.png
+      }
+    }
+  }
+}
+
+material ArUcoMarker/Marker3
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture marker_3.png
+      }
+    }
+  }
+}
+
+material ArUcoMarker/Marker4
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture marker_4.png
+      }
+    }
+  }
+}
+
+material ArUcoMarker/Marker5
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture marker_5.png
+      }
+    }
+  }
+}
+
+material ArUcoMarker/Marker6
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture marker_6.png
+      }
+    }
+  }
+}
+
+material ArUcoMarker/Marker7
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture marker_7.png
+      }
+    }
+  }
+}
+
+material ArUcoMarker/Marker8
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture marker_8.png
+      }
+    }
+  }
+}
+
+material ArUcoMarker/Marker9
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture marker_9.png
+      }
+    }
+  }
+}

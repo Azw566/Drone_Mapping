@@ -1,0 +1,64 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+
+Visualization Manager:
+  Global Options:
+    Fixed Frame: world
+
+  Displays:
+    # TF tree: shows all coordinate frames and their relationships.
+    # You should see base_link → lidar_link → camera_link for each drone.
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+      Update Interval: 0
+      Frame Timeout: 15
+
+    # Drone 1 point cloud (raw LiDAR data)
+    - Class: rviz_default_plugins/PointCloud2
+      Name: D1 LiDAR
+      Enabled: true
+      Topic:
+        Value: /d1/points_raw
+        Depth: 5
+      Size (Pixels): 2
+      Color Transformer: FlatColor
+      Color: 0; 255; 0        # Green for drone 1
+
+    # Drone 2 point cloud
+    - Class: rviz_default_plugins/PointCloud2
+      Name: D2 LiDAR
+      Enabled: true
+      Topic:
+        Value: /d2/points_raw
+        Depth: 5
+      Size (Pixels): 2
+      Color Transformer: FlatColor
+      Color: 255; 100; 0      # Orange for drone 2
+
+    # Drone 1 camera image
+    - Class: rviz_default_plugins/Image
+      Name: D1 Camera
+      Enabled: true
+      Topic:
+        Value: /d1/camera/image_raw
+        Depth: 5
+
+    # Drone 2 camera image
+    - Class: rviz_default_plugins/Image
+      Name: D2 Camera
+      Enabled: true
+      Topic:
+        Value: /d2/camera/image_raw
+        Depth: 5
+
+    # Grid for spatial reference
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 20

@@ -1,0 +1,101 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+  <model name="aruco_marker">
+    <static>true</static>
+    
+    <link name="marker_0">
+      <visual name="visual">
+        <geometry>
+          <plane>
+            <size>0.2 0.2</size> </plane>
+        </geometry>
+        <material>
+          <diffuse>1 1 1 1</diffuse>
+          <pbr>
+            <metal>
+              <albedo_map>model://aruco_marker/materials/textures/marker_0.png</albedo_map>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <pose>0 0 0 0 0 0</pose>
+    </link>
+
+    <link name="marker_2">
+      <visual name="visual">
+        <geometry>
+          <plane>
+            <size>0.2 0.2</size>
+          </plane>
+        </geometry>
+        <material>
+          <diffuse>1 1 1 1</diffuse>
+          <pbr>
+            <metal>
+              <albedo_map>model://aruco_marker/materials/textures/marker_2.png</albedo_map>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <pose>-0.5 0 0 0 0 0</pose>
+    </link>
+    
+    <link name="marker_3">
+      <visual name="visual">
+        <geometry>
+          <plane>
+            <size>0.2 0.2</size>
+          </plane>
+        </geometry>
+        <material>
+          <diffuse>1 1 1 1</diffuse>
+          <pbr>
+            <metal>
+              <albedo_map>model://aruco_marker/materials/textures/marker_3.png</albedo_map>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <pose>0 0.5 0 0 0 0</pose>
+    </link>
+    
+    <link name="marker_4">
+      <visual name="visual">
+        <geometry>
+          <plane>
+            <size>0.2 0.2</size>
+          </plane>
+        </geometry>
+        <material>
+          <diffuse>1 1 1 1</diffuse>
+          <pbr>
+            <metal>
+              <albedo_map>model://aruco_marker/materials/textures/marker_4.png</albedo_map>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <pose>0 -0.5 0 0 0 0</pose>
+    </link>
+    
+    <link name="marker_1">
+      <visual name="visual">
+        <geometry>
+          <plane>
+            <size>0.2 0.2</size>
+          </plane>
+        </geometry>
+        <material>
+          <diffuse>1 1 1 1</diffuse>
+          <pbr>
+            <metal>
+              <albedo_map>model://aruco_marker/materials/textures/marker_1.png</albedo_map>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <pose>0.5 0 0 0 0 0</pose>
+    </link>
+    
+    </model>
+</sdf>

@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  x500_vision_lidar — Official PX4 x500 + 3D LiDAR + RGB Camera
+
+  HOW THIS WORKS:
+  ═══════════════
+  <include merge="true"> pulls in the entire x500 model (body, motors, IMU,
+  etc.) and merges it INTO this model. "merge=true" means all links and joints
+  from x500 become part of x500_vision_lidar — no nested model wrapper.
+
+  We then ADD our own links/joints/sensors on top:
+    - lidar_link: VLP-16 style 3D LiDAR (on top of drone, for LIO-SAM)
+    - camera_link: RGB camera (front-facing, angled down, for ArUco detection)
+    - OdometryPublisher plugin (ground truth, useful for debugging SLAM)
+
+  SENSOR POSES (relative to base_link center):
+    LiDAR:  (0, 0, 0.12)         → 12cm above center
+    Camera: (0.15, 0, -0.05)     → 15cm forward, 5cm below, pitched 15° down
+
+  These poses define the static TF transforms. They MUST match:
+    1. Your URDF (for robot_state_publisher)
+    2. LIO-SAM's extrinsic calibration (extrinsicTrans / extrinsicRot)
+-->
+<sdf version="1.9">
+  <model name="x500_vision_lidar">
+
+    <!-- ════════════════════════════════════════════════════
+         INCLUDE BASE DRONE
+         ════════════════════════════════════════════════════
+         This pulls in the x500 model which itself includes x500_base.
+         You get: base_link, 4 rotors, motor plugins, IMU sensor.
+         merge="true" flattens everything into this model's namespace.
+    -->
+    <include merge="true">
+      <uri>x500</uri>
+    </include>
+
+    <!-- ════════════════════════════════════════════════════
+         3D LiDAR (Velodyne VLP-16 style)
+         ════════════════════════════════════════════════════
+         Mounted on TOP of the drone body.
+
+         LIO-SAM needs:
+           - 3D point cloud (PointCloud2) at ~10Hz
+           - Ring information (which of the 16 lasers fired)
+           - Timestamps per point (for motion compensation)
+
+         The gpu_lidar sensor type handles all of this in Gazebo Garden+.
+    -->
+    <link name="lidar_link">
+      <pose relative_to="base_link">0 0 0.12 0 0 0</pose>
+      <inertial>
+        <mass>0.83</mass>
+        <inertia>
+          <ixx>0.000908</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.000908</iyy>
+          <iyz>0</iyz>
+          <izz>0.001104</izz>
+        </inertia>
+      </inertial>
+
+      <visual name="lidar_visual">
+        <geometry>
+          <cylinder>
+            <radius>0.05</radius>
+            <length>0.07</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.0 0.0 0.8 1</ambient>
+          <diffuse>0.0 0.0 0.8 1</diffuse>
+        </material>
+      </visual>
+
+      <collision name="lidar_collision">
+        <geometry>
+          <cylinder>
+            <radius>0.05</radius>
+            <length>0.07</length>
+          </cylinder>
+        </geometry>
+      </collision>
+
+      <sensor name="vlp16" type="gpu_lidar">
+        <update_rate>10</update_rate>
+        <always_on>true</always_on>
+        <topic>lidar</topic>
+        <visualize>false</visualize>
+
+        <lidar>
+          <scan>
+            <horizontal>
+              <!-- 1800 points per ring, full 360° -->
+              <samples>1800</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.14159</min_angle>
+              <max_angle>3.14159</max_angle>
+            </horizontal>
+            <vertical>
+              <!-- 16 rings spanning ±15° vertical FOV -->
+              <samples>16</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.2618</min_angle>
+              <max_angle>0.2618</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.3</min>
+            <max>100.0</max>
+            <resolution>0.003</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.01</stddev>
+          </noise>
+        </lidar>
+      </sensor>
+    </link>
+
+    <joint name="lidar_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>lidar_link</child>
+    </joint>
+
+    <!-- ════════════════════════════════════════════════════
+         RGB CAMERA
+         ════════════════════════════════════════════════════
+         Front-facing, pitched 15° down for ArUco tag detection.
+         640×480 @ 15 FPS is sufficient for ArUco detection.
+    -->
+    <link name="camera_link">
+      <!-- 15cm forward, 5cm below center, pitched 15° down (0.26 rad) -->
+      <pose relative_to="base_link">0.15 0 -0.05 0 0.26 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>1e-05</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1e-05</iyy>
+          <iyz>0</iyz>
+          <izz>1e-05</izz>
+        </inertia>
+      </inertial>
+
+      <visual name="camera_visual">
+        <geometry>
+          <box><size>0.03 0.04 0.02</size></box>
+        </geometry>
+        <material>
+          <ambient>0.8 0.0 0.0 1</ambient>
+          <diffuse>0.8 0.0 0.0 1</diffuse>
+        </material>
+      </visual>
+
+      <sensor name="rgb_camera" type="camera">
+        <update_rate>15</update_rate>
+        <always_on>true</always_on>
+        <topic>camera</topic>
+        <visualize>false</visualize>
+
+        <camera>
+          <horizontal_fov>1.396</horizontal_fov>
+          <image>
+            <width>640</width>
+            <height>480</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>50.0</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.005</stddev>
+          </noise>
+        </camera>
+      </sensor>
+    </link>
+
+    <joint name="camera_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>camera_link</child>
+    </joint>
+
+    <!-- ════════════════════════════════════════════════════
+         PLUGINS
+         ════════════════════════════════════════════════════ -->
+
+    <!-- Ground-truth odometry (from Gazebo physics).
+         Publishes the real pose of the drone.
+         Useful for comparing against LIO-SAM estimate. -->
+    <plugin
+      filename="gz-sim-odometry-publisher-system"
+      name="gz::sim::systems::OdometryPublisher">
+      <dimensions>3</dimensions>
+    </plugin>
+
+  </model>
+</sdf>

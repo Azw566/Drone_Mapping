@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>drone_bringup</name>
+  <version>0.1.0</version>
+  <description>Launch files, configs, and Gazebo models for multi-drone simulation</description>
+  <maintainer email="telemaquebuzzi@gmail.com">developer</maintainer>
+  <license>MIT</license>
+
+  <!-- ament_python because this package has no C++ code.
+       It only contains launch files, YAML configs, SDF models, and maybe Python scripts. -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Runtime dependencies: what must be installed for this package to work -->
+  <exec_depend>ros2launch</exec_depend>          <!-- ros2 launch command -->
+  <exec_depend>ros_gz_bridge</exec_depend>        <!-- Gazebo ↔ ROS2 topic bridge -->
+  <exec_depend>ros_gz_sim</exec_depend>           <!-- Gazebo simulation launcher -->
+  <exec_depend>robot_state_publisher</exec_depend><!-- Publishes URDF → TF tree -->
+  <exec_depend>tf2_ros</exec_depend>              <!-- TF2 library -->
+  <exec_depend>rviz2</exec_depend>                <!-- Visualization -->
+  <exec_depend>drone_interfaces</exec_depend>     <!-- Our custom messages -->
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

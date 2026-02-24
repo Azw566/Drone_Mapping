@@ -1,0 +1,15 @@
+# RegisterPOI.srv
+#
+# Called by a drone's ArUco detector to register a sighting with the
+# central POI manager. The manager deduplicates (same tag seen multiple times)
+# and returns whether this is a new discovery or an update.
+
+# === REQUEST (detector → poi_manager) ===
+uint32 tag_id
+geometry_msgs/PoseStamped world_pose
+float32 confidence
+string detected_by
+---
+# === RESPONSE (poi_manager → detector) ===
+bool is_new                            # true = first time seeing this tag_id
+uint32 total_tags_found                # Running count of unique tags discovered

@@ -1,0 +1,8 @@
+sudo apt install \
+  ros-humble-xacro \
+  ros-humble-robot-state-publisher \
+  ros-humble-tf2-ros \
+  ros-humble-tf2-tools \
+  ros-humble-cv-bridge \
+  ros-humble-image-transport \
+  python3-opencv

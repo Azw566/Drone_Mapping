@@ -1,0 +1,165 @@
+# lio_sam_params.yaml
+#
+# Configuration for LIO-SAM (LiDAR Inertial Odometry via Smoothing And Mapping)
+# Reference: https://github.com/TixiaoShan/LIO-SAM
+#
+# HOW LIO-SAM USES THESE PARAMETERS:
+# ═══════════════════════════════════
+# LIO-SAM is a factor graph SLAM system. It creates a graph where:
+#   - Nodes = robot poses at different times
+#   - Edges = constraints between poses (from IMU, LiDAR matching, loop closure)
+#
+# The optimizer (GTSAM library) finds the set of poses that best satisfies
+# all constraints. Parameters here control:
+#   1. How sensor data is interpreted (noise, frame transforms)
+#   2. How aggressively features are extracted from point clouds
+#   3. When and how loop closures are detected
+#
+# TUNING STRATEGY:
+# Start with these defaults. If SLAM diverges:
+#   1. Check extrinsics first (most common issue)
+#   2. Increase IMU noise values (SLAM trusts IMU too much)
+#   3. Reduce feature extraction thresholds (not enough features)
+
+lio_sam:
+  ros__parameters:
+
+    # ═══════════════════════════════════════
+    # TOPIC NAMES
+    # ═══════════════════════════════════════
+    # These MUST match your ros_gz_bridge remappings.
+    # The namespace prefix (d1/, d2/) is added by the launch file.
+    pointCloudTopic: "points_raw"    # Raw 3D LiDAR point cloud
+    imuTopic: "imu/data"            # IMU data (accel + gyro)
+    odomTopic: "odometry/imu"        # Output: IMU-predicted odometry
+
+    # ═══════════════════════════════════════
+    # FRAME NAMES
+    # ═══════════════════════════════════════
+    # These define the TF tree nodes that LIO-SAM publishes/uses.
+    lidarFrame: "lidar_link"
+    baselinkFrame: "base_link"
+    odometryFrame: "odom"
+    mapFrame: "map"
+
+    # ═══════════════════════════════════════
+    # LIDAR CONFIGURATION
+    # ═══════════════════════════════════════
+    sensor: velodyne    # Point cloud format. Options: velodyne, ouster, livox
+                        # This determines how LIO-SAM extracts ring/time info
+                        # from the point cloud fields.
+
+    N_SCAN: 16          # Number of LiDAR rings (VLP-16 = 16)
+    Horizon_SCAN: 1800  # Points per ring per revolution
+                        # Must match the <samples> in your SDF LiDAR config.
+
+    # ═══════════════════════════════════════
+    # IMU CONFIGURATION
+    # ═══════════════════════════════════════
+    # CRITICAL: These noise parameters MUST match your simulated IMU.
+    # If these are too low, LIO-SAM trusts IMU too much → drift.
+    # If too high, LIO-SAM ignores IMU → jerky, relies only on LiDAR.
+
+    # Gyroscope noise (rad/s). From your SDF <stddev> value.
+    imuAccNoise: 3.9939570888238808e-03
+    imuGyrNoise: 1.5636343949698187e-03
+
+    # Accelerometer bias random walk (how bias changes over time)
+    imuAccBiasN: 6.4356659353532566e-05
+    imuGyrBiasN: 3.5640318696367613e-05
+
+    # Gravity magnitude. 9.80511 is standard.
+    # LIO-SAM uses this to separate gravity from linear acceleration.
+    imuGravity: 9.80511
+
+    # IMU message coordinate convention.
+    # 0 = traditional (x-forward, y-left, z-up) ← most common
+    # 1 = NED (x-north, y-east, z-down) ← some aviation IMUs
+    imuRPYWeight: 0.01    # How much to trust IMU for absolute orientation
+                          # Low = trust LiDAR more (good for indoor)
+
+    # ═══════════════════════════════════════
+    # EXTRINSIC CALIBRATION: LiDAR → IMU
+    # ═══════════════════════════════════════
+    # This is the transform FROM the LiDAR frame TO the IMU frame.
+    # It MUST match your URDF.
+    #
+    # In our model:
+    #   LiDAR is at (0, 0, 0.12) relative to base_link
+    #   IMU is at (0, 0, 0) relative to base_link
+    #   So LiDAR→IMU = (0, 0, -0.12) with no rotation.
+    #
+    # IF THIS IS WRONG, YOUR MAP WILL LOOK LIKE SPAGHETTI.
+    # This is the #1 cause of LIO-SAM failure.
+
+    extrinsicTrans: [0.0, 0.0, -0.12]
+    extrinsicRot: [1, 0, 0,
+                   0, 1, 0,
+                   0, 0, 1]    # Identity = no rotation between LiDAR and IMU
+
+    # ═══════════════════════════════════════
+    # FEATURE EXTRACTION
+    # ═══════════════════════════════════════
+    # LIO-SAM extracts two types of features from each LiDAR scan:
+    #   - Edge features: points on sharp edges (corners, object boundaries)
+    #   - Surface features: points on flat surfaces (walls, floor)
+    #
+    # More features = more constraints = better accuracy but slower.
+    # Fewer features = faster but may lose tracking in feature-poor areas.
+
+    edgeThreshold: 1.0       # Curvature threshold for edge points
+    surfThreshold: 0.1       # Curvature threshold for surface points
+    edgeFeatureMinValidNum: 10   # Min edge features per scan to be valid
+    surfFeatureMinValidNum: 100  # Min surface features per scan
+
+    # ═══════════════════════════════════════
+    # ODOMETRY / SCAN MATCHING
+    # ═══════════════════════════════════════
+    # How LIO-SAM aligns consecutive scans to estimate motion.
+
+    # Number of surrounding keyframes to use for scan-to-map matching.
+    # More = more accurate but slower. 50 is a good balance.
+    surroundingKeyframeSearchRadius: 15.0   # meters
+    surroundingKeyframeDensity: 2.0         # downsample density
+    surroundingKeyframeSearchNum: 50        # max number of keyframes
+
+    # ═══════════════════════════════════════
+    # LOOP CLOSURE
+    # ═══════════════════════════════════════
+    # Loop closure detects when the drone revisits a previously mapped area.
+    # This is crucial for correcting accumulated drift.
+    #
+    # How it works:
+    # 1. Every N seconds, check if current position is near a past keyframe
+    # 2. If nearby, align current scan to the old keyframe (ICP)
+    # 3. If alignment is good enough, add a loop closure constraint
+    # 4. The optimizer adjusts all poses to accommodate the new constraint
+
+    loopClosureEnableFlag: true     # Enable/disable loop closure
+    loopClosureFrequency: 1.0       # Hz — how often to check
+    surroundingKeyframeSize: 50     # How many nearby keyframes to consider
+    historyKeyframeSearchRadius: 15.0  # meters — how far back to look
+    historyKeyframeSearchTimeDiff: 30.0  # seconds — minimum time gap
+                                         # (avoids trivial "loops" when slow)
+    historyKeyframeSearchNum: 25    # Max historical frames to check
+    historyKeyframeFitnessScore: 0.3  # ICP fitness threshold
+                                       # Lower = stricter loop acceptance
+                                       # Too low = misses valid loops
+                                       # Too high = accepts false loops (BAD)
+
+    # ═══════════════════════════════════════
+    # VOXEL FILTER SIZES
+    # ═══════════════════════════════════════
+    # Downsample point clouds to reduce computation.
+    # Smaller voxel = more points = more accurate but slower.
+
+    odometrySurfLeafSize: 0.4       # Surface features downsampling (meters)
+    mappingCornerLeafSize: 0.2      # Corner features in map
+    mappingSurfLeafSize: 0.4        # Surface features in map
+
+    # ═══════════════════════════════════════
+    # VISUALIZATION
+    # ═══════════════════════════════════════
+    globalMapVisualizationSearchRadius: 1000.0  # meters
+    globalMapVisualizationPoseDensity: 10.0
+    globalMapVisualizationLeafSize: 1.0

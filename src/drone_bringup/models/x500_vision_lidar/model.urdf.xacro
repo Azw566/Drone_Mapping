@@ -1,0 +1,59 @@
+<?xml version="1.0"?>
+<!--
+  x500_vision_lidar.urdf.xacro
+
+  This URDF mirrors the sensor layout from model.sdf.
+  robot_state_publisher reads this and broadcasts static TFs:
+    base_link → lidar_link
+    base_link → camera_link → camera_optical_frame
+    base_link → imu_link
+
+  THE xyz/rpy VALUES MUST MATCH model.sdf POSES EXACTLY.
+  If they don't, LIO-SAM's extrinsic calibration will be wrong
+  and your map will be distorted.
+
+  Note: The x500 base model already has an IMU at the body center.
+  We declare imu_link at (0,0,0) to match.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="x500_vision_lidar">
+
+  <xacro:arg name="ns" default="d1"/>
+
+  <!-- Base body frame -->
+  <link name="base_link"/>
+
+  <!-- ═══ LiDAR: 12cm above center ═══ -->
+  <link name="lidar_link"/>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0 0 0.12" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ═══ Camera: 15cm forward, 5cm below, pitched 15° down ═══ -->
+  <link name="camera_link"/>
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <origin xyz="0.15 0 -0.05" rpy="0 0.26 0"/>
+  </joint>
+
+  <!-- Optical frame: converts URDF convention → OpenCV convention.
+       Z-forward, X-right, Y-down (required for cv2.aruco / solvePnP).
+       This is a standard ROS rotation you'll see in every camera setup. -->
+  <link name="camera_optical_frame"/>
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+  </joint>
+
+  <!-- ═══ IMU: at body center (co-located with base_link) ═══ -->
+  <link name="imu_link"/>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>

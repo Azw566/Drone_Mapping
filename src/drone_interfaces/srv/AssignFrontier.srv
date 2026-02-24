@@ -1,0 +1,16 @@
+# AssignFrontier.srv
+#
+# Called by the coordinator to tell a drone "go explore this frontier".
+# Services are synchronous request-response (unlike topics which are fire-and-forget).
+#
+# Why a service and not a topic?
+# Because we need confirmation: did the drone accept the goal?
+# If it's busy avoiding a collision, it might reject.
+
+# === REQUEST (coordinator → drone) ===
+string drone_id                        # Which drone to assign
+geometry_msgs/Point frontier_centroid  # Where to go
+---
+# === RESPONSE (drone → coordinator) ===
+bool accepted                          # true = "on my way", false = "can't right now"
+string reason                          # If rejected: "avoiding_collision", "low_battery", etc.
