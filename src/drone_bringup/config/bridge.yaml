@@ -8,7 +8,7 @@
 # - Direction options: BIDIRECTIONAL, GZ_TO_ROS, ROS_TO_GZ.
 
 - ros_topic_name: "/d1/points_raw"
-  gz_topic_name: "/world/maze/model/x500_d1/link/lidar_link/sensor/velodyne_vlp16/scan/points"
+  gz_topic_name: "/world/maze/model/x500_d1/link/lidar_link/sensor/vlp16/scan/points"
   ros_type_name: "sensor_msgs/msg/PointCloud2"
   gz_type_name: "gz.msgs.PointCloudPacked"
   direction: GZ_TO_ROS
@@ -32,7 +32,7 @@
   direction: GZ_TO_ROS
 
 - ros_topic_name: "/d2/points_raw"
-  gz_topic_name: "/world/maze/model/x500_d2/link/lidar_link/sensor/velodyne_vlp16/scan/points"
+  gz_topic_name: "/world/maze/model/x500_d2/link/lidar_link/sensor/vlp16/scan/points"
   ros_type_name: "sensor_msgs/msg/PointCloud2"
   gz_type_name: "gz.msgs.PointCloudPacked"
   direction: GZ_TO_ROS

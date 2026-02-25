@@ -19,11 +19,11 @@ def generate_launch_description():
         namespace=drone_ns,
         output='screen',
         parameters=[{
-            'input_topic': 'points_raw',
-            'output_topic': 'points_adapted',
+            'input_topic': 'd1/points_raw',
+            'output_topic': 'd1/points_adapted',
             'n_scan': 16,
             'frame_id': 'lidar_link',
-            'use_best_effort': True,
+            'use_best_effort': False,
         }],
     )
 
@@ -37,7 +37,7 @@ def generate_launch_description():
             'input_topic': 'imu/data',
             'output_topic': 'imu/data_adapted',
             'frame_id': 'imu_link',
-            'use_best_effort': True,
+            'use_best_effort': False,
         }],
     )
 

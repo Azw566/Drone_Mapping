@@ -1,12 +1,8 @@
-"""
-WHAT THIS FILE DOES:
-1. Starts Gazebo with the warehouse world
-2. Spawns drone 1 at position (x=-7, y=0)
-3. Spawns drone 2 at position (x=-7, y=2)
-4. Starts a MicroXRCE-DDS agent for each PX4 instance (placeholder)
-5. Starts robot_state_publisher for each drone (publishes TF tree)
-6. Starts ros_gz_bridge for each drone (bridges Gazebo topics → ROS2)
-
+"""Quick reference
+- Gazebo + world
+- Spawn d1 at entrance (-7, 0, 0.5)
+- Spawn d2 at entrance offset (-7, 2, 0.5)
+- Start bridges + TF publishers
 """
 
 import os
@@ -57,9 +53,9 @@ def generate_launch_description():
             '--reptype', 'gz.msgs.Boolean',
             '--timeout', '5000',
             '--req', (
-                'uri: "model://x500_vision_lidar", '
+                f'sdf_filename: "{os.path.join(model_path, "x500_vision_lidar", "model.sdf")}", '
                 'name: "x500_d1", '
-                'pose: {position: {x: 1.5, y: -8, z: 0.5}}'
+                'pose: {position: {x: -1.0, y: -8.0, z: 0.5}}'
             ),
         ],
         output='screen',
@@ -77,9 +73,9 @@ def generate_launch_description():
                     '--reptype', 'gz.msgs.Boolean',
                     '--timeout', '5000',
                     '--req', (
-                        'uri: "model://x500_vision_lidar", '
+                        f'sdf_filename: "{os.path.join(model_path, "x500_vision_lidar", "model.sdf")}", '
                         'name: "x500_d2", '
-                        'pose: {position: {x: -1.5, y: -8, z: 0.5}}'
+                        'pose: {position: {x: 1.0, y: -8.0, z: 0.5}}'
                     ),
                 ],
                 output='screen',
