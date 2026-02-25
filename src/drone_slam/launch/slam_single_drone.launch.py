@@ -19,8 +19,9 @@ def generate_launch_description():
         namespace=drone_ns,
         output='screen',
         parameters=[{
-            'input_topic': 'd1/points_raw',
-            'output_topic': 'd1/points_adapted',
+            # absolute topics so multiple namespaces can be launched side-by-side
+            'input_topic': '/d1/points_raw',
+            'output_topic': '/d1/points_adapted',
             'n_scan': 16,
             'frame_id': 'lidar_link',
             'use_best_effort': True,

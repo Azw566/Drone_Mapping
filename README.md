@@ -9,7 +9,7 @@ ros2 launch drone_bringup simulation.launch.py use_rviz:=true
 export XRCE_DDS_CONFIG=udp://127.0.0.1:8888
 cd ~/px4_workspace/PX4-Autopilot
 PX4_GZ_MODEL=x500_d1 PX4_GZ_WORLD=maze PX4_GZ_MODEL_ALLOW_SPAWN=0 \
-  make px4_sitl gz_x500_vision_lidar
+  make px4_sitl gz_x500_vision
   
 	term 3 (drone 2)
 export XRCE_DDS_CONFIG=udp://127.0.0.1:8889
@@ -18,6 +18,7 @@ PX4_GZ_MODEL=x500_d2 PX4_GZ_WORLD=maze PX4_GZ_MODEL_ALLOW_SPAWN=0 \
   make px4_sitl gz_x500_vision_lidar
 
 	term 4 
+cd Micro-XRCE-DDS-Agent/build
 ./MicroXRCEAgent udp4 -p 8888   # d1
 ./MicroXRCEAgent udp4 -p 8889   # d2
 
