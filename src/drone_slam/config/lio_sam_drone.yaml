@@ -15,9 +15,9 @@ lio_sam:
     Horizon_SCAN: 1800
 
     # topics (relative; namespace prefixes them)
-    pointCloudTopic: "points_adapted"
-    imuTopic: "imu/data_adapted"
-
+    pointCloudTopic: "/d1/points_adapted" 
+    imuTopic: "/d1/imu/data_adapted"
+    
     # extrinsics: LiDAR 0.12 m above IMU (adjust if model differs)
     extrinsicRot: [1, 0, 0,
                    0, 1, 0,

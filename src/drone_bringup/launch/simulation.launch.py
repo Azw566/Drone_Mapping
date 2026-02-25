@@ -62,7 +62,6 @@ def generate_launch_description():
     )
 
     # Delay drone 2 spawn by 2 seconds to avoid Gazebo race conditions.
-    # If both spawn simultaneously, Gazebo sometimes assigns duplicate IDs.
     drone2_spawn = TimerAction(
         period=2.0,
         actions=[
@@ -83,7 +82,6 @@ def generate_launch_description():
         ],
     )
 
-
     # Single bridge configured via YAML to avoid magnetometer / barometer topics.
     bridge = Node(
         package='ros_gz_bridge',
@@ -92,7 +90,6 @@ def generate_launch_description():
         parameters=[{'config_file': bridge_config}],
         output='screen',
     )
-
 
     def create_robot_state_publisher(drone_ns):
         """Creates robot_state_publisher for one drone."""
@@ -109,9 +106,6 @@ def generate_launch_description():
             name='robot_state_publisher',
             parameters=[{
                 'robot_description': urdf_content,
-                # frame_prefix adds the namespace to all TF frame names.
-                # Without it, both drones would publish "base_link" and
-                # TF would be confused. With it:
                 #   drone 1: d1/base_link, d1/lidar_link, d1/camera_link
                 #   drone 2: d2/base_link, d2/lidar_link, d2/camera_link
                 'frame_prefix': f'{drone_ns}/',
