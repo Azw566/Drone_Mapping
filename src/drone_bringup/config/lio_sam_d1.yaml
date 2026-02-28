@@ -1,23 +1,26 @@
 # Minimal LIO-SAM config for drone d1 (VLP-16 style LiDAR)
-lio_sam:
-  use_sim_time: true
-  N_SCAN: 16
-  Horizon_SCAN: 1800
-  downsampleRate: 1
-  imuTopic: "/d1/imu/data"
-  pointCloudTopic: "/d1/points_enriched"
-  odomFrame: "d1/odom"
-  mapFrame: "d1/map"
-  baseLinkFrame: "d1/base_link"
-  lidarFrame: "d1/lidar_link"
-  # Extrinsics lidar -> IMU (from model: lidar 12 cm above base/IMU)
-  extrinsicRot: [1.0, 0.0, 0.0,
-                 0.0, 1.0, 0.0,
-                 0.0, 0.0, 1.0]
-  extrinsicTrans: [0.0, 0.0, 0.12]
-  imuAccNoise: 3.9939570888238808e-03
-  imuGyrNoise: 1.5636343949698187e-03
-  imuAccBiasN: 6.4356659353532566e-05
-  imuGyrBiasN: 3.5640318696367613e-05
-  imuGravity: 9.80511
-  mappingFrequency: 10.0
+# /**:  applies these parameters to every node that loads this file
+#       (imuPreintegration, imageProjection, featureExtraction, mapOptimization)
+/**:
+  ros__parameters:
+    use_sim_time: true
+    N_SCAN: 16
+    Horizon_SCAN: 1800
+    downsampleRate: 1
+    imuTopic: "/d1/imu/data"
+    pointCloudTopic: "/d1/points_enriched"
+    odomFrame: "d1/odom"
+    mapFrame: "d1/map"
+    baseLinkFrame: "d1/base_link"
+    lidarFrame: "d1/lidar_link"
+    # Extrinsics lidar -> IMU (from model: lidar 12 cm above base/IMU)
+    extrinsicRot: [1.0, 0.0, 0.0,
+                   0.0, 1.0, 0.0,
+                   0.0, 0.0, 1.0]
+    extrinsicTrans: [0.0, 0.0, 0.12]
+    imuAccNoise: 3.9939570888238808e-03
+    imuGyrNoise: 1.5636343949698187e-03
+    imuAccBiasN: 6.4356659353532566e-05
+    imuGyrBiasN: 3.5640318696367613e-05
+    imuGravity: 9.80511
+    mappingFrequency: 10.0

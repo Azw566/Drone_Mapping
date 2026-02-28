@@ -26,7 +26,7 @@
   direction: GZ_TO_ROS
 
 - ros_topic_name: "/d1/imu/data"
-  gz_topic_name: "/world/maze/model/x500_d1/link/imu_link/sensor/imu_sensor/imu"
+  gz_topic_name: "/world/maze/model/x500_d1/link/base_link/sensor/imu_sensor/imu"
   ros_type_name: "sensor_msgs/msg/Imu"
   gz_type_name: "gz.msgs.IMU"
   direction: GZ_TO_ROS
@@ -50,7 +50,7 @@
   direction: GZ_TO_ROS
 
 - ros_topic_name: "/d2/imu/data"
-  gz_topic_name: "/world/maze/model/x500_d2/link/imu_link/sensor/imu_sensor/imu"
+  gz_topic_name: "/world/maze/model/x500_d2/link/base_link/sensor/imu_sensor/imu"
   ros_type_name: "sensor_msgs/msg/Imu"
   gz_type_name: "gz.msgs.IMU"
   direction: GZ_TO_ROS

@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>exploration_manager</name>
+  <version>0.1.0</version>
+  <description>
+    Autonomous exploration intelligence:
+      exploration_planner — tracks the frontier goal assigned to one drone
+      drone_coordinator   — assigns non-overlapping frontiers to idle drones
+      poi_manager         — deduplicates ArUco tag detections across drones
+  </description>
+
+  <maintainer email="telemaque@example.com">telemaque</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>drone_interfaces</depend>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <test_depend>pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

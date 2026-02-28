@@ -7,6 +7,7 @@ import os
 
 
 def generate_launch_description():
+    drone_ns = LaunchConfiguration('drone_ns')
     cloud_topic = LaunchConfiguration('cloud_topic')
     frame_id = LaunchConfiguration('frame_id')
     resolution = LaunchConfiguration('resolution')
@@ -16,17 +17,21 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
+            'drone_ns',
+            default_value='d1',
+            description='Drone namespace (d1 or d2) — used to prefix output topics'),
+        DeclareLaunchArgument(
             'cloud_topic',
             default_value='/d1/lio_sam/mapping/cloud_registered',
-            description='PointCloud2 topic feeding OctoMap'),
+            description='PointCloud2 topic from LIO-SAM mapOptimization'),
         DeclareLaunchArgument(
             'frame_id',
-            default_value='map',
-            description='Fixed frame for octomap_server output'),
+            default_value='d1/map',
+            description='Fixed frame matching LIO-SAM mapFrame (e.g. d1/map)'),
         DeclareLaunchArgument(
             'resolution',
             default_value='0.1',
-            description='OctoMap resolution (meters)'),
+            description='OctoMap voxel resolution in metres'),
 
         Node(
             package='octomap_server',
@@ -38,7 +43,14 @@ def generate_launch_description():
                 'resolution': resolution,
             }],
             remappings=[
-                ('/cloud_in', cloud_topic),
+                # Input: LIO-SAM registered point cloud
+                ('cloud_in', cloud_topic),
+                # Outputs: namespace under the drone so d1 and d2 can coexist
+                ('projected_map',            ['/', drone_ns, '/projected_map']),
+                ('octomap_binary',           ['/', drone_ns, '/octomap_binary']),
+                ('octomap_full',             ['/', drone_ns, '/octomap_full']),
+                ('occupied_cells_vis_array', ['/', drone_ns, '/occupied_cells_vis_array']),
+                ('free_cells_vis_array',     ['/', drone_ns, '/free_cells_vis_array']),
             ],
         ),
     ])

@@ -18,9 +18,12 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}/
 )
 
-# Install Python utilities/nodes
+# Install Python utilities/nodes and shell scripts
 install(PROGRAMS
   scripts/lidar_enricher.py
+  scripts/launch_px4_instance.sh
+  scripts/save_arena_map.py
+  scripts/gcs_heartbeat.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

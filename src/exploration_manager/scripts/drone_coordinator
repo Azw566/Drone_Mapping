@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from exploration_manager.drone_coordinator_node import main
+main()

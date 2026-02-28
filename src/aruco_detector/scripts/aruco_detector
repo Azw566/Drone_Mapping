@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from aruco_detector.aruco_detector_node import main
+main()

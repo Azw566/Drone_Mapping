@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>aruco_detector</name>
+  <version>0.1.0</version>
+  <description>
+    ArUco marker detection pipeline for drone RGB cameras.
+    Subscribes to sensor_msgs/Image + CameraInfo, runs OpenCV ArUco + PnP,
+    transforms detected poses to the map frame via TF2, and publishes
+    drone_interfaces/ArucoDetection for multi-drone POI integration.
+  </description>
+
+  <maintainer email="telemaque@example.com">telemaque</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>drone_interfaces</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

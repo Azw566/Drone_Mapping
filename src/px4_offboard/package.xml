@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>px4_offboard</name>
+  <version>0.1.0</version>
+  <description>
+    Offboard flight control for PX4-powered drones.
+    Provides:
+      visual_odom_bridge  — LIO-SAM ENU odometry → PX4 NED VehicleOdometry
+      offboard_controller — arm / takeoff / navigate via TrajectorySetpoint
+  </description>
+
+  <maintainer email="telemaque@example.com">telemaque</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>px4_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>drone_interfaces</depend>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <test_depend>pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

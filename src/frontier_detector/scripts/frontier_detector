@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from frontier_detector.frontier_detector_node import main
+main()

@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from px4_offboard.visual_odom_bridge_node import main
+main()

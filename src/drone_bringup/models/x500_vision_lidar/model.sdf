@@ -86,7 +86,6 @@
       <sensor name="vlp16" type="gpu_lidar">
         <update_rate>10</update_rate>
         <always_on>true</always_on>
-        <topic>lidar</topic>
         <visualize>false</visualize>
 
         <lidar>
@@ -159,7 +158,6 @@
       <sensor name="rgb_camera" type="camera">
         <update_rate>15</update_rate>
         <always_on>true</always_on>
-        <topic>camera</topic>
         <visualize>false</visualize>
 
         <camera>

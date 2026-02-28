@@ -1,46 +1,117 @@
 Panels:
   - Class: rviz_common/Displays
     Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
 
 Visualization Manager:
   Global Options:
-    Fixed Frame: world
+    Fixed Frame: d1/map
+    Background Color: 48; 48; 48
 
   Displays:
-    # TF tree: shows all coordinate frames and their relationships.
-    # You should see base_link → lidar_link → camera_link for each drone.
+
+    # ── TF tree ──────────────────────────────────────────────────────────
     - Class: rviz_default_plugins/TF
       Name: TF
-      Enabled: true
-      Show Arrows: true
+      Enabled: false
+      Show Arrows: false
       Show Axes: true
       Show Names: true
       Update Interval: 0
       Frame Timeout: 15
 
-    # Drone 1 point cloud (raw LiDAR data)
-    - Class: rviz_default_plugins/PointCloud2
-      Name: D1 LiDAR
+    # ── Reference grid ───────────────────────────────────────────────────
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 30
+      Color: 160; 160; 164
+      Alpha: 0.5
+      Reference Frame: d1/map
+
+    # ── Drone 1 — 2D OccupancyGrid map ───────────────────────────────────
+    - Class: rviz_default_plugins/Map
+      Name: D1 Map
       Enabled: true
       Topic:
-        Value: /d1/points_raw
+        Value: /d1/projected_map
+        Depth: 1
+      Alpha: 0.85
+      Draw Behind: false
+      Color Scheme: map
+
+    # ── Drone 2 — 2D OccupancyGrid map ───────────────────────────────────
+    - Class: rviz_default_plugins/Map
+      Name: D2 Map
+      Enabled: true
+      Topic:
+        Value: /d2/projected_map
+        Depth: 1
+      Alpha: 0.6
+      Draw Behind: false
+      Color Scheme: map
+
+    # ── Drone 1 — registered LiDAR cloud (SLAM output) ───────────────────
+    - Class: rviz_default_plugins/PointCloud2
+      Name: D1 Cloud Registered
+      Enabled: true
+      Topic:
+        Value: /d1/lio_sam/mapping/cloud_registered
         Depth: 5
       Size (Pixels): 2
       Color Transformer: FlatColor
-      Color: 0; 255; 0        # Green for drone 1
+      Color: 0; 220; 80
 
-    # Drone 2 point cloud
+    # ── Drone 2 — registered LiDAR cloud ─────────────────────────────────
     - Class: rviz_default_plugins/PointCloud2
-      Name: D2 LiDAR
+      Name: D2 Cloud Registered
       Enabled: true
       Topic:
-        Value: /d2/points_raw
+        Value: /d2/lio_sam/mapping/cloud_registered
         Depth: 5
       Size (Pixels): 2
       Color Transformer: FlatColor
-      Color: 255; 100; 0      # Orange for drone 2
+      Color: 255; 140; 0
 
-    # Drone 1 camera image
+    # ── Drone 1 — LIO-SAM trajectory path ────────────────────────────────
+    - Class: rviz_default_plugins/Path
+      Name: D1 Path
+      Enabled: true
+      Topic:
+        Value: /d1/lio_sam/mapping/path
+        Depth: 5
+      Color: 0; 220; 80
+      Line Width: 0.05
+
+    # ── Drone 2 — LIO-SAM trajectory path ────────────────────────────────
+    - Class: rviz_default_plugins/Path
+      Name: D2 Path
+      Enabled: true
+      Topic:
+        Value: /d2/lio_sam/mapping/path
+        Depth: 5
+      Color: 255; 140; 0
+      Line Width: 0.05
+
+    # ── Drone 1 — frontier clusters (MarkerArray) ─────────────────────────
+    - Class: rviz_default_plugins/MarkerArray
+      Name: D1 Frontiers
+      Enabled: true
+      Topic:
+        Value: /d1/frontiers/markers
+        Depth: 5
+
+    # ── Drone 2 — frontier clusters ───────────────────────────────────────
+    - Class: rviz_default_plugins/MarkerArray
+      Name: D2 Frontiers
+      Enabled: true
+      Topic:
+        Value: /d2/frontiers/markers
+        Depth: 5
+
+    # ── Camera feeds ──────────────────────────────────────────────────────
     - Class: rviz_default_plugins/Image
       Name: D1 Camera
       Enabled: true
@@ -48,7 +119,6 @@ Visualization Manager:
         Value: /d1/camera/image_raw
         Depth: 5
 
-    # Drone 2 camera image
     - Class: rviz_default_plugins/Image
       Name: D2 Camera
       Enabled: true
@@ -56,9 +126,25 @@ Visualization Manager:
         Value: /d2/camera/image_raw
         Depth: 5
 
-    # Grid for spatial reference
-    - Class: rviz_default_plugins/Grid
-      Name: Grid
+    # ── POI — discovered ArUco tags (spheres + labels from poi_manager) ───
+    - Class: rviz_default_plugins/MarkerArray
+      Name: POI Tags
       Enabled: true
-      Cell Size: 1
-      Plane Cell Count: 20
+      Topic:
+        Value: /poi/markers
+        Depth: 10
+
+    # ── OctoMap 3D visualisation ──────────────────────────────────────────
+    - Class: rviz_default_plugins/MarkerArray
+      Name: D1 OctoMap Occupied
+      Enabled: false
+      Topic:
+        Value: /d1/occupied_cells_vis_array
+        Depth: 5
+
+    - Class: rviz_default_plugins/MarkerArray
+      Name: D2 OctoMap Occupied
+      Enabled: false
+      Topic:
+        Value: /d2/occupied_cells_vis_array
+        Depth: 5
