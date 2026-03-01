@@ -43,6 +43,7 @@ from px4_msgs.msg import (
     VehicleLocalPosition,
 )
 from geometry_msgs.msg import Point
+from std_msgs.msg import Empty
 
 _NAN = float('nan')
 
@@ -55,6 +56,7 @@ _OFFBOARD    = 'offboard'
 _TAKING_OFF  = 'taking_off'
 _HOVER       = 'hover'
 _EXPLORING   = 'exploring'
+_LANDING     = 'landing'
 
 # Config
 HOVER_ALT_M      = 3.0    # metres above takeoff (NED z = -HOVER_ALT_M)
@@ -99,6 +101,8 @@ class OffboardControllerNode(Node):
             self._pos_cb, px4_qos)
         self.create_subscription(
             Point, f'/{ns}/goal_pose', self._goal_cb, 10)
+        self.create_subscription(
+            Empty, f'/{ns}/cmd/land', self._land_cb, 10)
 
         # ── State ────────────────────────────────────────────────────────────
         self._state      = _IDLE
@@ -128,6 +132,11 @@ class OffboardControllerNode(Node):
             self._home_ned = [msg.x, msg.y, msg.z]
             self.get_logger().info(
                 f'[{self._ns}] Home NED: {self._home_ned}')
+
+    def _land_cb(self, msg: Empty):
+        if self._state != _IDLE:
+            self.get_logger().info(f'[{self._ns}] Land command → LANDING')
+            self._state = _LANDING
 
     def _goal_cb(self, msg: Point):
         """Accept a new goal in ENU map frame."""
@@ -216,6 +225,16 @@ class OffboardControllerNode(Node):
                 self._goal_enu = None
                 self.get_logger().info(f'[{self._ns}] Goal reached → HOVER')
 
+        elif self._state == _LANDING:
+            self._publish_ocm(velocity_mode=True)
+            self._publish_landing_setpoint()
+            if self._pos_ned[2] > -0.3:   # within 30 cm of ground (NED z → 0)
+                self._send_disarm_command()
+                self._state    = _IDLE
+                self._goal_ned = None
+                self._goal_enu = None
+                self.get_logger().info(f'[{self._ns}] Landed → IDLE')
+
     # ── Timestamp helper ──────────────────────────────────────────────────
     def _now_us(self) -> int:
         """Return a timestamp in PX4 microseconds.
@@ -227,7 +246,7 @@ class OffboardControllerNode(Node):
         """
         if self._px4_us > 0:
             return self._px4_us
-        return self._now_us()
+        return self.get_clock().now().nanoseconds // 1000
 
     # ── PX4 command helpers ────────────────────────────────────────────────
     def _publish_ocm(self, velocity_mode: bool = False):
@@ -283,6 +302,22 @@ class OffboardControllerNode(Node):
                         float(self._goal_ned[2])]
         msg.yaw = self._yaw_to_goal()
         self._pub_sp.publish(msg)
+
+    def _publish_landing_setpoint(self):
+        msg = TrajectorySetpoint()
+        msg.timestamp = self._now_us()
+        msg.position  = [_NAN, _NAN, _NAN]
+        msg.velocity  = [0.0, 0.0, 0.8]   # NED +z = downward, 0.8 m/s
+        msg.yaw       = _NAN
+        self._pub_sp.publish(msg)
+
+    def _send_disarm_command(self):
+        msg = VehicleCommand()
+        msg.timestamp     = self._now_us()
+        msg.command       = VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM
+        msg.param1        = 0.0
+        msg.from_external = True
+        self._pub_cmd.publish(msg)
 
     def _send_arm_command(self):
         msg = VehicleCommand()

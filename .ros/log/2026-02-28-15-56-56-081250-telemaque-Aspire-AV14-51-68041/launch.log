@@ -1,0 +1,30 @@
+1772290616.0822697 [INFO] [launch]: All log files can be found below /home/telemaque/ros_ws/drone/.ros/log/2026-02-28-15-56-56-081250-telemaque-Aspire-AV14-51-68041
+1772290616.0824234 [INFO] [launch]: Default logging verbosity is set to INFO
+1772290616.4595375 [INFO] [gz-1]: process started with pid [68116]
+1772290616.4597342 [INFO] [rviz2-2]: process started with pid [68118]
+1772290616.5776269 [ERROR] [gz-1]: process has died [pid 68116, exit code 255, cmd 'gz sim -r -v4 -s --headless-rendering /home/telemaque/ros_ws/drone/install/drone_bringup/share/drone_bringup/worlds/maze.sdf'].
+1772290617.5715151 [ERROR] [rviz2-2]: process has died [pid 68118, exit code -6, cmd '/opt/ros/humble/lib/rviz2/rviz2 -d /home/telemaque/ros_ws/drone/install/drone_bringup/share/drone_bringup/rviz/multi_drone.rviz --ros-args -r __node:=rviz2'].
+1772290621.4667294 [INFO] [gz-3]: process started with pid [68162]
+1772290623.4626367 [ERROR] [gz-3]: process has died [pid 68162, exit code 255, cmd 'gz service -s /world/maze/create --reqtype gz.msgs.EntityFactory --reptype gz.msgs.Boolean --timeout 5000 --req sdf_filename: "/home/telemaque/ros_ws/drone/install/drone_bringup/share/drone_bringup/models/x500_vision_lidar/model.sdf", name: "x500_d1", pose: {position: {x: -1.0, y: -8.0, z: 0.5}}'].
+1772290624.4780138 [INFO] [parameter_bridge-4]: process started with pid [68180]
+1772290624.4781895 [INFO] [robot_state_publisher-5]: process started with pid [68182]
+1772290624.4782469 [INFO] [robot_state_publisher-6]: process started with pid [68184]
+1772290625.4703133 [INFO] [gz-7]: process started with pid [68214]
+1772290625.5509202 [ERROR] [gz-7]: process has died [pid 68214, exit code 255, cmd 'gz service -s /world/maze/create --reqtype gz.msgs.EntityFactory --reptype gz.msgs.Boolean --timeout 5000 --req sdf_filename: "/home/telemaque/ros_ws/drone/install/drone_bringup/share/drone_bringup/models/x500_vision_lidar/model.sdf", name: "x500_d2", pose: {position: {x: 1.0, y: -8.0, z: 0.5}}'].
+1772290625.5634201 [ERROR] [robot_state_publisher-6]: process has died [pid 68184, exit code -6, cmd '/opt/ros/humble/lib/robot_state_publisher/robot_state_publisher --ros-args -r __node:=robot_state_publisher -r __ns:=/d2 --params-file /tmp/launch_params_2kbzfz8n'].
+1772290626.4749808 [INFO] [xrce_agent_port8888-8]: process started with pid [68224]
+1772290626.4755387 [INFO] [xrce_agent_port8889-9]: process started with pid [68226]
+1772290626.4759364 [INFO] [px4_d1-10]: process started with pid [68228]
+1772290626.4762981 [INFO] [gcs_heartbeat-11]: process started with pid [68230]
+1772290626.4873610 [INFO] [xrce_agent_port8888-8]: process has finished cleanly [pid 68224]
+1772290626.4888439 [INFO] [xrce_agent_port8889-9]: process has finished cleanly [pid 68226]
+1772290626.5511191 [ERROR] [gcs_heartbeat-11]: process has died [pid 68230, exit code 1, cmd 'python3 /home/telemaque/ros_ws/drone/install/drone_bringup/lib/drone_bringup/gcs_heartbeat.py 2'].
+1772290627.6098447 [ERROR] [robot_state_publisher-5]: process has died [pid 68182, exit code -6, cmd '/opt/ros/humble/lib/robot_state_publisher/robot_state_publisher --ros-args -r __node:=robot_state_publisher -r __ns:=/d1 --params-file /tmp/launch_params_o045strq'].
+1772290631.4760108 [ERROR] [parameter_bridge-4]: process has died [pid 68180, exit code -6, cmd '/opt/ros/humble/lib/ros_gz_bridge/parameter_bridge --ros-args -r __node:=gz_bridge --params-file /tmp/launch_params_6fn6e6r5'].
+1772290631.4767950 [INFO] [px4_d2-12]: process started with pid [68283]
+1772290631.4788957 [ERROR] [px4_d1-10]: process has died [pid 68228, exit code 255, cmd 'bash /home/telemaque/ros_ws/drone/install/drone_bringup/lib/drone_bringup/launch_px4_instance.sh 0 x500_d1 d1'].
+1772290636.4840252 [ERROR] [px4_d2-12]: process has died [pid 68283, exit code 255, cmd 'bash /home/telemaque/ros_ws/drone/install/drone_bringup/lib/drone_bringup/launch_px4_instance.sh 1 x500_d2 d2'].
+1772290646.4778488 [INFO] [offboard_controller-13]: process started with pid [68380]
+1772290646.4780912 [INFO] [offboard_controller-14]: process started with pid [68382]
+1772290646.9236426 [ERROR] [offboard_controller-14]: process has died [pid 68382, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/px4_offboard/lib/px4_offboard/offboard_controller --ros-args -r __node:=offboard_controller_d2 --params-file /tmp/launch_params_m_kl9uhz'].
+1772290646.9384916 [ERROR] [offboard_controller-13]: process has died [pid 68380, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/px4_offboard/lib/px4_offboard/offboard_controller --ros-args -r __node:=offboard_controller_d1 --params-file /tmp/launch_params_u_nj34ma'].

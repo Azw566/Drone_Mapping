@@ -23,8 +23,10 @@ import math
 import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.qos import QoSProfile, DurabilityPolicy
 
 from geometry_msgs.msg import Point
+from std_msgs.msg import Bool, Empty
 from drone_interfaces.msg import FrontierList, DroneState
 from drone_interfaces.srv import AssignFrontier
 
@@ -37,17 +39,26 @@ class DroneCoordinatorNode(Node):
 
         self.declare_parameter('drone_namespaces', ['d1', 'd2'])
         self.declare_parameter('safety_radius', 3.0)
+        self.declare_parameter('low_battery_threshold', 20.0)
+        self.declare_parameter('no_frontier_timeout', 30.0)
 
         namespaces = (self.get_parameter('drone_namespaces')
                       .get_parameter_value().string_array_value)
         self._safety_radius = (self.get_parameter('safety_radius')
                                 .get_parameter_value().double_value)
+        self._low_bat_threshold = (self.get_parameter('low_battery_threshold')
+                                   .get_parameter_value().double_value)
+        self._no_frontier_timeout = (self.get_parameter('no_frontier_timeout')
+                                     .get_parameter_value().double_value)
         self._namespaces = list(namespaces)
 
         # Per-drone state
         self._states:    dict[str, DroneState]    = {}
         self._frontiers: dict[str, FrontierList]  = {}
         self._assign_clients: dict[str, object] = {}
+        self._land_pubs:          dict[str, object] = {}
+        self._last_frontier_time: dict[str, float]  = {}
+        self._mission_complete = False
 
         cbg = ReentrantCallbackGroup()
 
@@ -61,6 +72,12 @@ class DroneCoordinatorNode(Node):
             self._assign_clients[ns] = self.create_client(
                 AssignFrontier, f'/{ns}/assign_frontier',
                 callback_group=cbg)
+            self._land_pubs[ns] = self.create_publisher(Empty, f'/{ns}/cmd/land', 10)
+            self._last_frontier_time[ns] = float('inf')
+
+        # Latched publisher for mission-complete signal
+        _latch = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self._pub_mission_complete = self.create_publisher(Bool, '/mission_complete', _latch)
 
         # Coordination loop at 1 Hz
         self.create_timer(1.0, self._coordinate, callback_group=cbg)
@@ -74,9 +91,39 @@ class DroneCoordinatorNode(Node):
 
     def _frontier_cb(self, ns: str, msg: FrontierList):
         self._frontiers[ns] = msg
+        self._last_frontier_time[ns] = self.get_clock().now().nanoseconds * 1e-9
 
     # ── Coordination ───────────────────────────────────────────────────────
     def _coordinate(self):
+        if self._mission_complete:
+            return
+
+        now_s = self.get_clock().now().nanoseconds * 1e-9
+
+        # Low-battery check: trigger landing for any drone below threshold
+        for ns, state in self._states.items():
+            bat = state.battery_percent
+            if 0.0 < bat < self._low_bat_threshold:
+                self.get_logger().warn(
+                    f'[coordinator] {ns} low battery ({bat:.1f}%) → landing')
+                self._land_pubs[ns].publish(Empty())
+
+        # Mission-complete check
+        all_reported = len(self._states) == len(self._namespaces)
+        all_idle = all_reported and all(
+            s.status == _STATUS_IDLE for s in self._states.values())
+        no_frontiers = all(
+            self._last_frontier_time[ns] != float('inf') and
+            (now_s - self._last_frontier_time[ns]) > self._no_frontier_timeout
+            for ns in self._namespaces)
+        if all_idle and no_frontiers:
+            self._mission_complete = True
+            self.get_logger().info('[coordinator] Mission complete — all frontiers exhausted')
+            self._pub_mission_complete.publish(Bool(data=True))
+            for ns in self._namespaces:
+                self._land_pubs[ns].publish(Empty())
+            return
+
         # Build list of currently claimed goal centroids (one per non-idle drone)
         claimed: list[Point] = []
         for ns, state in self._states.items():
@@ -87,6 +134,10 @@ class DroneCoordinatorNode(Node):
             state = self._states.get(ns)
             if state is None or state.status != _STATUS_IDLE:
                 continue  # drone not idle — skip
+
+            # Skip drones with low battery (they are landing)
+            if state.battery_percent < self._low_bat_threshold:
+                continue
 
             best = self._pick_best_frontier(ns, state, claimed)
             if best is None:

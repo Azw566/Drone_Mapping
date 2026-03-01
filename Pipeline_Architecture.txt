@@ -1,0 +1,807 @@
+================================================================================
+  MULTI-DRONE AUTONOMOUS EXPLORATION PIPELINE — COMPLETE TOPIC REFERENCE
+  Project: ros_ws/drone  |  2 drones: d1, d2  |  ROS2 Humble + PX4 + Gazebo
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. PHYSICAL SIMULATION (Gazebo + ros_gz_bridge)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Gazebo runs one world (maze.sdf) containing two drone model instances:
+  x500_d1  spawned at (-1.0, -8.0, 0.5)
+  x500_d2  spawned at ( 1.0, -8.0, 0.5)
+
+Each model has three sensors simulated internally by Gazebo:
+  - VLP-16 style LiDAR : 16 rings x 1800 pts, 10 Hz, mounted +0.12 m above base
+  - IMU                : fused accelerometer + gyroscope
+  - RGB camera         : 640x480, 15 FPS, front-facing, pitched 15 deg down
+
+ros_gz_bridge (parameter_bridge, config: drone_bringup/config/bridge.yaml)
+converts those Gazebo sensor streams into ROS2 topics.
+After bridge startup (t=8 s) the following topics are live:
+
+  TOPIC                         TYPE                          SOURCE
+  /d1/points_raw                sensor_msgs/PointCloud2       VLP-16
+  /d1/imu/data                  sensor_msgs/Imu               IMU
+  /d1/camera/image_raw          sensor_msgs/Image             RGB camera
+  /d1/camera/camera_info        sensor_msgs/CameraInfo        camera intrinsics
+  /d2/points_raw                sensor_msgs/PointCloud2
+  /d2/imu/data                  sensor_msgs/Imu
+  /d2/camera/image_raw          sensor_msgs/Image
+  /d2/camera/camera_info        sensor_msgs/CameraInfo
+
+robot_state_publisher (one per drone, fed the processed URDF via xacro)
+publishes the static TF chain describing each drone's physical structure:
+
+  d1/base_link
+    └─ d1/lidar_link
+    └─ d1/camera_link
+         └─ d1/camera_optical_frame   (rotated -90 deg X, -90 deg Z from camera_link
+                                       standard optical frame: Z=forward, X=right, Y=down)
+
+  (mirror tree for d2)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  2. PX4 SITL + MicroXRCE-DDS BRIDGE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Two PX4 processes run in Gazebo-standalone mode (PX4_GZ_STANDALONE=1).
+Instead of spawning their own Gazebo, they attach to the already-running
+x500_d1 / x500_d2 models via the Gazebo transport layer.
+
+  PX4 instance 0  PX4_GZ_MODEL_NAME=x500_d1  PX4_UXRCE_DDS_NS=d1  port 8888
+  PX4 instance 1  PX4_GZ_MODEL_NAME=x500_d2  PX4_UXRCE_DDS_NS=d2  port 8889
+
+Each instance runs a full flight stack internally: EKF2 state estimator,
+multicopter position controller, commander (arming logic), etc.
+
+Rootfs (parameter storage) per instance:
+  /tmp/px4_sitl_0/   (d1)
+  /tmp/px4_sitl_1/   (d2)
+
+Custom EKF2 parameters injected via stdin pipe 20 s after boot:
+  param set EKF2_EV_CTRL  15    fuse position + velocity + heading + height from vision
+  param set EKF2_HGT_MODE  3    use vision as height source (not baro)
+  param set COM_ARM_WO_GPS 1    allow arming without GPS fix
+  param set COM_RC_IN_MODE 4    no RC transmitter required
+  commander set_ekf_origin 47.397742 8.545594 488.0
+                                sets a fake GPS origin so xy_valid=true
+
+Two MicroXRCEAgent processes bridge PX4's internal uORB DDS bus to ROS2:
+  MicroXRCEAgent udp4 -p 8888   bridges d1
+  MicroXRCEAgent udp4 -p 8889   bridges d2
+
+Once the bridge is running, ROS2 can read PX4 state and write commands.
+ALL px4_msgs topics use BEST_EFFORT + VOLATILE + KEEP_LAST(10) QoS.
+
+  PX4 → ROS2 (output topics)
+  TOPIC                                   TYPE
+  /d1/fmu/out/vehicle_status_v1           px4_msgs/VehicleStatus
+      arming_state (1=DISARMED, 2=ARMED)
+      nav_state    (14=OFFBOARD, see full list in VehicleStatus.msg)
+      NOTE: PX4 v1.16 publishes this as vehicle_status_v1 via UXRCE-DDS
+  /d1/fmu/out/vehicle_local_position      px4_msgs/VehicleLocalPosition
+      x, y, z in NED metres from EKF2 origin
+      xy_valid, z_valid (bool flags — must be true before flying)
+  /d1/fmu/out/vehicle_odometry            px4_msgs/VehicleOdometry
+      PX4's own fused pose estimate (NED, Hamiltonian quaternion w,x,y,z)
+  /d1/fmu/out/battery_status              px4_msgs/BatteryStatus
+      remaining  float32  0.0–1.0 (fraction of full charge); -1 = unknown
+      consumed by exploration_planner to report real battery_percent
+  /d2/fmu/out/*   (mirror of above)
+
+  ROS2 → PX4 (input topics — what our nodes write)
+  TOPIC                                   TYPE                    WRITTEN BY
+  /d1/fmu/in/vehicle_visual_odometry      px4_msgs/VehicleOdometry  visual_odom_bridge
+  /d1/fmu/in/offboard_control_mode        px4_msgs/OffboardControlMode  offboard_controller
+  /d1/fmu/in/trajectory_setpoint          px4_msgs/TrajectorySetpoint   offboard_controller
+  /d1/fmu/in/vehicle_command              px4_msgs/VehicleCommand       offboard_controller
+  /d2/fmu/in/*   (mirror of above)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  3. LIDAR ENRICHER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LIO-SAM requires each PointCloud2 point to carry two extra fields:
+  ring  (uint16) — which laser ring (0..15) the point came from
+  time  (float32) — relative timestamp within the scan
+
+Gazebo's VLP-16 plugin does not output these fields, so lidar_enricher
+synthesises them from the point's elevation angle and scan ordering.
+
+  /d1/points_raw  →  [lidar_enricher_d1]  →  /d1/points_enriched
+  /d2/points_raw  →  [lidar_enricher_d2]  →  /d2/points_enriched
+
+Parameters: n_scan=16, horizon_scan=1800, scan_rate=10.0
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  4. LIO-SAM (SLAM)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LIO-SAM is a tightly-coupled LiDAR-inertial odometry and mapping system.
+It runs as 4 separate ROS2 nodes, all loaded with the same config YAML.
+There are 4 nodes for d1 and 4 nodes for d2 = 8 LIO-SAM nodes total.
+
+Config files:
+  drone_bringup/config/lio_sam_d1.yaml   (imuTopic, pointCloudTopic, frame names, noise)
+  drone_bringup/config/lio_sam_d2.yaml
+
+The 4 nodes and their roles:
+  lio_sam_imuPreintegration   pre-integrates IMU between LiDAR scans for high-rate odometry
+  lio_sam_imageProjection     projects 3D points onto a range image, removes motion distortion
+  lio_sam_featureExtraction   extracts edge and planar feature points from the range image
+  lio_sam_mapOptimization     builds and optimises the global factor graph map
+
+All 4 nodes for d1 run under namespace d1, so their ROS2 node names become:
+  /d1/lio_sam_imuPreintegration
+  /d1/lio_sam_imageProjection
+  /d1/lio_sam_featureExtraction
+  /d1/lio_sam_mapOptimization
+
+Inputs consumed:
+  /d1/points_enriched         sensor_msgs/PointCloud2   (from lidar_enricher)
+  /d1/imu/data                sensor_msgs/Imu           (from ros_gz_bridge)
+
+Outputs produced (all in the d1/map frame, ENU/ROS convention):
+  TOPIC                                     TYPE
+  /d1/lio_sam/mapping/cloud_registered      sensor_msgs/PointCloud2
+      dense globally registered point cloud — every scan transformed into the map frame
+  /d1/lio_sam/mapping/odometry              nav_msgs/Odometry
+      globally optimised 6-DoF pose (position + quaternion) + velocity
+      frame_id=d1/map, child_frame_id=d1/odom
+  /d1/lio_sam/mapping/path                  nav_msgs/Path
+      full history of poses (complete drone trajectory)
+
+TF frames published by LIO-SAM:
+  d1/map → d1/odom → d1/base_link
+
+Combined with robot_state_publisher, the full TF tree is:
+  d1/map → d1/odom → d1/base_link → d1/lidar_link
+                                   → d1/camera_link → d1/camera_optical_frame
+
+(Mirror: /d2/lio_sam/mapping/*, d2/map → d2/odom → d2/base_link → ...)
+
+Coordinate convention used throughout LIO-SAM output:
+  x = East, y = North, z = Up  (ENU, standard ROS convention)
+  quaternion = (x, y, z, w) ROS convention
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  5. VISUAL ODOMETRY BRIDGE (ENU → NED for PX4 EKF2)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Node: visual_odom_bridge (one per drone, in px4_offboard package)
+
+  /d1/lio_sam/mapping/odometry  →  [visual_odom_bridge_d1]  →  /d1/fmu/in/vehicle_visual_odometry
+  /d2/lio_sam/mapping/odometry  →  [visual_odom_bridge_d2]  →  /d2/fmu/in/vehicle_visual_odometry
+
+Why this conversion is needed:
+  LIO-SAM outputs pose in ENU (ROS standard).
+  PX4's EKF2 expects VehicleOdometry in NED (North-East-Down).
+  The quaternion convention also differs (ROS: x,y,z,w  vs  PX4: w,x,y,z Hamiltonian).
+
+Position conversion (ENU → NED):
+  ned_x =  enu_y    (North  maps to ENU-y)
+  ned_y =  enu_x    (East   maps to ENU-x)
+  ned_z = -enu_z    (Down   is negative Up)
+
+Quaternion conversion:
+  A 180-degree rotation around axis (1/√2, 1/√2, 0) transforms ENU to NED.
+  In Hamiltonian notation: q_R = [w=0, x=√2/2, y=√2/2, z=0]
+  q_NED = q_R ⊗ q_ENU   (Hamilton product)
+  The ROS (x,y,z,w) quaternion is reordered to (w,x,y,z) before the product.
+
+Velocity conversion follows the same rule as position:
+  ned_vx =  enu_vy
+  ned_vy =  enu_vx
+  ned_vz = -enu_vz
+
+VehicleOdometry fields set:
+  pose_frame     = POSE_FRAME_NED (1)
+  velocity_frame = VELOCITY_FRAME_NED (1)
+  position[3]    = [ned_x, ned_y, ned_z]
+  q[4]           = [ned_w, ned_x, ned_y, ned_z]
+  velocity[3]    = [ned_vx, ned_vy, ned_vz]
+  *_variance     = NaN (let PX4 use its own tuning)
+
+PX4's EKF2 receives this at ~10 Hz and fuses it with IMU data.
+Because EKF2_EV_CTRL=15, it trusts position, velocity, heading, and height
+from vision — no GPS is needed. The result is available on:
+  /d1/fmu/out/vehicle_local_position   (NED position, used by offboard_controller)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  6. OFFBOARD FLIGHT CONTROLLER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Node: offboard_controller (one per drone, in px4_offboard package)
+
+This node arms the drone and flies it to goals sent by the exploration planner.
+It runs a state machine at 10 Hz.
+
+STATE MACHINE:
+
+  IDLE
+    Wait for the first valid NED position fix.
+    Condition to advance: vehicle_local_position.xy_valid AND z_valid = true
+    → PRE_ARM
+
+  PRE_ARM
+    PX4 requires OffboardControlMode + TrajectorySetpoint to be published
+    continuously for at least 2 seconds before it will accept an OFFBOARD
+    mode switch. This state does exactly that, holding a setpoint at the
+    current home position.
+    Condition to advance: 2 seconds elapsed
+    → SWITCHING
+
+  SWITCHING
+    Request OFFBOARD mode (VehicleCommand DO_SET_MODE, param1=1, param2=6).
+    Keep publishing OCM + hold setpoint. Retry the mode switch every 1 s.
+    Condition to advance: vehicle_status_v1.nav_state == 14 (OFFBOARD confirmed)
+    → ARMING
+
+  ARMING
+    OFFBOARD mode is now active. Send ARM command
+    (VehicleCommand COMPONENT_ARM_DISARM, param1=1.0). Retry every 2 s.
+    Keep publishing OCM + hold setpoint.
+    Condition to advance: vehicle_status_v1.arming_state == 2 (ARMED)
+    → TAKING_OFF
+
+  TAKING_OFF
+    Climb using VELOCITY setpoints (avoids aggressive position-error spool-up
+    from ground). OCM publishes velocity=True.
+    TrajectorySetpoint:
+      position = [NaN, NaN, NaN]
+      velocity = [0.0, 0.0, -1.5]   (NED: -z = upward, 1.5 m/s)
+      yaw      = NaN                 (hold current heading)
+    Condition to advance: |current_ned_z - (-hover_alt)| < 0.3 m
+    → HOVER
+
+  HOVER
+    Hold current horizontal position at altitude. OCM position=True.
+    TrajectorySetpoint:
+      position = [current_ned_x, current_ned_y, -hover_alt]
+      yaw      = NaN   (hold current heading)
+    Wait for a /dX/goal_pose message from exploration_planner.
+    When goal arrives → EXPLORING
+
+  EXPLORING
+    Fly toward goal_ned. OCM position=True.
+    TrajectorySetpoint:
+      position = [goal_ned_x, goal_ned_y, -hover_alt]
+      yaw      = atan2(goal_ned_y - pos_ned_y, goal_ned_x - pos_ned_x)
+    Condition to advance: 2D distance to goal < 0.5 m
+    → HOVER (clears goal, waits for next assignment)
+
+  LANDING  (entered from any non-IDLE state via /dX/cmd/land)
+    Descend using VELOCITY setpoints. OCM velocity=True.
+    TrajectorySetpoint:
+      position = [NaN, NaN, NaN]
+      velocity = [0.0, 0.0, 0.8]   (NED: +z = downward, 0.8 m/s)
+      yaw      = NaN
+    Condition to advance: current_ned_z > -0.3  (within 30 cm of ground)
+    → sends DISARM command (COMPONENT_ARM_DISARM, param1=0.0)
+    → IDLE
+
+Goal coordinate conversion (applied when /dX/goal_pose arrives):
+  goal_pose is in ENU map frame (geometry_msgs/Point)
+  goal_ned = [goal_enu.y, goal_enu.x, -hover_alt]
+
+NOTE on yaw: all setpoints use yaw = NaN.  NaN instructs PX4 to hold the
+current heading. Using yaw = 0.0 caused the yaw controller to rotate the
+drone from its spawn heading (~97°) toward north, saturating one motor pair
+and preventing lift.
+
+Topics this node READS:
+  TOPIC                                USED FOR
+  /d1/fmu/out/vehicle_status_v1        detect ARMED + OFFBOARD confirmed
+  /d1/fmu/out/vehicle_local_position   current NED x/y/z; altitude hold; goal check
+  /d1/goal_pose  (geometry_msgs/Point) goal in ENU from exploration_planner
+  /d1/cmd/land   (std_msgs/Empty)      triggers LANDING state from any non-IDLE state
+
+Topics this node WRITES:
+  TOPIC                                CONTENT
+  /d1/fmu/in/offboard_control_mode     position=True or velocity=True at 10 Hz
+  /d1/fmu/in/trajectory_setpoint       NED setpoint at 10 Hz
+  /d1/fmu/in/vehicle_command           ARM, DISARM, and SET_MODE commands
+
+(Mirror node offboard_controller_d2 does the same for /d2/*)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  7. 3D OCCUPANCY MAP (OctoMap)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Node: octomap_server (one per drone, from octomap_server ROS2 package)
+
+  /d1/lio_sam/mapping/cloud_registered  →  [octomap_server d1]
+  /d2/lio_sam/mapping/cloud_registered  →  [octomap_server d2]
+
+Each registered cloud point is inserted into an octree voxel map.
+The voxel size (resolution) is set in octomap_pipeline/params/octomap_params.yaml.
+The frame_id is overridden at launch to d1/map or d2/map.
+
+Output topics:
+  TOPIC                         TYPE                        CONTENTS
+  /d1/projected_map             nav_msgs/OccupancyGrid      2D horizontal slice
+  /d1/octomap_binary            octomap_msgs/Octomap        compressed 3D binary map
+  /d1/octomap_full              octomap_msgs/Octomap        full 3D map with probabilities
+  /d1/occupied_cells_vis_array  visualization_msgs/MarkerArray  occupied voxels for RViz
+  /d1/free_cells_vis_array      visualization_msgs/MarkerArray  free voxels for RViz
+  (mirror /d2/* for drone 2)
+
+The projected_map OccupancyGrid cell values:
+    0   = free   (drone has flown there, laser confirmed no obstacle)
+  100   = occupied (obstacle detected)
+   -1   = unknown (never observed by any scan)
+
+The frame_id of projected_map is d1/map, so it shares the same ENU coordinate
+system as LIO-SAM output. Grid origin and resolution define how to convert
+grid (x_cell, y_cell) to world (x_metres, y_metres):
+  world_x = origin.position.x + (x_cell + 0.5) * resolution
+  world_y = origin.position.y + (y_cell + 0.5) * resolution
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  8. ARUCO TAG DETECTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Node: aruco_detector (one per drone, aruco_detector package)
+
+  /d1/camera/image_raw    ──┐
+  /d1/camera/camera_info  ──┴──▶  [aruco_detector_d1]  →  /d1/aruco/detections
+  /d2/camera/image_raw    ──┐
+  /d2/camera/camera_info  ──┴──▶  [aruco_detector_d2]  →  /d2/aruco/detections
+
+Processing pipeline per frame:
+  1. Convert ROS image to OpenCV BGR
+  2. Convert to greyscale
+  3. Run cv2.aruco.ArucoDetector (OpenCV >= 4.7) or cv2.aruco.detectMarkers (older)
+     using the DICT_4X4_250 dictionary
+  4. For each detected marker:
+     a. Build 3D object points in marker frame (physical size: 0.2 m default)
+        TL=(-h, h, 0)  TR=(h, h, 0)  BR=(h, -h, 0)  BL=(-h, -h, 0)  where h=size/2
+     b. cv2.solvePnP with SOLVEPNP_IPPE_SQUARE → rvec, tvec in camera_optical_frame
+     c. Build geometry_msgs/PoseStamped in d1/camera_optical_frame
+     d. tf_buffer.transform() to d1/map frame (ENU world frame)
+     e. Compute confidence = min(1.0, pixel_area / 10000)
+     f. Publish ArucoDetection
+
+ArucoDetection message fields:
+  tag_id       uint32        ArUco marker dictionary index
+  world_pose   PoseStamped   tag pose in d1/map frame (ENU)
+  confidence   float32       0.0 to 1.0
+  detected_by  string        "d1" or "d2"
+
+TF lookup used: d1/camera_optical_frame → d1/map
+This works because robot_state_publisher already published the
+camera_optical_frame joint (no extra static TF publisher needed).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  9. FRONTIER DETECTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Node: frontier_detector (one per drone, frontier_detector package)
+
+  /d1/projected_map  →  [frontier_detector_d1]  →  /d1/frontiers/markers
+                                                 →  /d1/frontiers/list
+  /d2/projected_map  →  [frontier_detector_d2]  →  /d2/frontiers/markers
+                                                 →  /d2/frontiers/list
+
+Runs at 2 Hz. Algorithm:
+
+  STEP 1 — Find frontier cells
+    A cell is a frontier cell if:
+      - Its OccupancyGrid value is 0 (free), AND
+      - At least one of its 4-neighbours (N, S, E, W) has value -1 (unknown)
+    These cells represent the boundary between explored and unexplored space.
+
+  STEP 2 — BFS clustering
+    Perform a 4-connected BFS flood fill over the frontier cells to group
+    spatially adjacent frontier cells into connected components (clusters).
+    Discard any cluster smaller than min_frontier_size cells (default: 5).
+
+  STEP 3 — Compute centroids
+    For each surviving cluster, compute the average cell position and convert
+    to world coordinates (metres) using the OccupancyGrid origin + resolution.
+
+  STEP 4 — Publish FrontierList
+    FrontierList message:
+      header      frame_id = d1/map, current timestamp
+      centroids[] geometry_msgs/Point — one per cluster, in ENU metres
+      sizes[]     float32             — number of cells in that cluster
+                                        (proxy for information gain: bigger = more to explore)
+
+  STEP 5 — Publish MarkerArray
+    One CUBE_LIST Marker per cluster, colour-coded by cluster index.
+    Used only for RViz visualisation.
+
+FrontierList is consumed by the drone_coordinator to assign exploration goals.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  10. EXPLORATION PLANNER (per drone)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Node: exploration_planner (one per drone, exploration_manager package)
+Instances: exploration_planner_d1, exploration_planner_d2
+
+This node is PASSIVE — it does NOT pick its own frontiers.
+It waits for the coordinator to assign one via the AssignFrontier service.
+Once assigned, it drives the offboard_controller toward that goal.
+
+Topics READ:
+  /d1/lio_sam/mapping/odometry   nav_msgs/Odometry         current ENU position (from LIO-SAM)
+  /d1/fmu/out/battery_status     px4_msgs/BatteryStatus    real battery level from PX4 SITL
+      msg.remaining (0.0–1.0) → battery_percent = remaining * 100
+      If remaining == -1 (unknown): keep last value
+
+Service SERVER:
+  /d1/assign_frontier            drone_interfaces/AssignFrontier
+    Request:
+      string drone_id               which drone this is for
+      geometry_msgs/Point frontier_centroid   where to go (ENU map frame)
+    Response:
+      bool   accepted               true = on my way
+      string reason                 why rejected (empty if accepted)
+    Behavior:
+      Sets _goal = frontier_centroid
+      Sets _status = "exploring"
+      Immediately publishes goal_pose
+      Always accepts in the current implementation
+
+Topics WRITTEN:
+  /d1/goal_pose   geometry_msgs/Point   goal in ENU map frame (re-published at 10 Hz)
+                                        consumed by offboard_controller
+  /d1/drone_state DroneState
+      drone_id        "d1"
+      current_pose    PoseStamped in d1/map (ENU, from LIO-SAM odometry)
+      current_goal    Point (current target centroid, zeros if idle)
+      status          "idle" or "exploring"
+      battery_percent float — REAL value from /d1/fmu/out/battery_status
+                               (starts at 100.0 at boot until first BatteryStatus arrives)
+
+Goal completion check (runs at 10 Hz):
+  2D Euclidean distance from current ENU position to goal centroid < 0.8 m
+  → status = "idle", goal cleared
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  11. DRONE COORDINATOR (singleton)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Node: drone_coordinator (one instance total, exploration_manager package)
+
+This is the "brain" that decides which drone goes where.
+It collects all available frontiers and all drone states, then assigns
+the best unclaimed frontier to each idle drone.
+
+Parameters:
+  low_battery_threshold   float  20.0 %  — trigger landing below this level
+  no_frontier_timeout     float  30.0 s  — declare mission complete if no new
+                                           frontiers seen for this long
+  safety_radius           float   3.0 m  — minimum separation between assigned goals
+
+Topics READ:
+  /d1/drone_state    DroneState   d1 current status, position, goal, battery
+  /d2/drone_state    DroneState   d2 current status, position, goal, battery
+  /d1/frontiers/list FrontierList d1's detected frontier clusters
+  /d2/frontiers/list FrontierList d2's detected frontier clusters
+
+Service CLIENTS (called asynchronously):
+  /d1/assign_frontier   AssignFrontier   sends a goal to d1's planner
+  /d2/assign_frontier   AssignFrontier   sends a goal to d2's planner
+
+Topics WRITTEN:
+  /d1/cmd/land   std_msgs/Empty   triggers landing on d1 (low battery or mission complete)
+  /d2/cmd/land   std_msgs/Empty   triggers landing on d2
+  /mission_complete  std_msgs/Bool  data=true when exploration is done
+      QoS: TRANSIENT_LOCAL (latched) so late-joining subscribers receive it
+
+Coordination loop runs at 1 Hz:
+
+  1. Guard: if mission already complete, return immediately.
+
+  2. Low-battery check:
+       For every drone where 0 < battery_percent < low_battery_threshold:
+         publish Empty to /dX/cmd/land (offboard_controller transitions to LANDING)
+         log a warning
+
+  3. Mission-complete check:
+       all_idle     = all drones have reported AND all status == "idle"
+       no_frontiers = for every drone, at least one FrontierList has been received
+                      AND (now - last_frontier_time) > no_frontier_timeout
+       If both conditions true:
+         set mission_complete = True
+         publish Bool(data=True) to /mission_complete
+         publish Empty to every /dX/cmd/land
+         return
+
+  4. Build claimed[] list:
+       For every non-idle drone, add its current_goal Point to claimed[].
+
+  5. For each IDLE drone (status == "idle"):
+     a. Skip if battery_percent < low_battery_threshold (already landing)
+     b. Score every centroid from BOTH d1's and d2's FrontierList:
+          score = cluster_size / max(1.0, distance_from_drone_to_centroid)
+          Bigger cluster = higher reward. Closer cluster = easier to reach.
+     c. Skip any centroid within safety_radius of a claimed goal.
+     d. Pick the centroid with the highest score.
+     e. If found and the service is ready:
+          Call /dX/assign_frontier asynchronously.
+          Immediately add the centroid to claimed[] (optimistic locking)
+          to prevent a second idle drone racing to the same target
+          within the same 1-second tick.
+
+  6. When the async call completes, log accepted/rejected.
+
+Why both drones share each other's FrontierList:
+  If d1 has explored one half of the maze, its frontiers are near its
+  explored area. d2 can be sent toward d1's frontiers if d2 is closer
+  to them, or if d2 has no frontiers of its own yet. This allows
+  cooperative exploration even if one drone's LiDAR coverage is larger.
+
+Why float('inf') init for _last_frontier_time:
+  Ensures mission-complete cannot trigger until at least one real FrontierList
+  has been received per drone, even if both drones happen to be idle at boot.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  12. POI MANAGER (singleton)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Node: poi_manager (one instance total, exploration_manager package)
+
+Central registry for all ArUco tag sightings from all drones.
+Deduplicates by tag_id, keeping only the highest-confidence sighting.
+
+Topics READ:
+  /d1/aruco/detections   drone_interfaces/ArucoDetection
+  /d2/aruco/detections   drone_interfaces/ArucoDetection
+
+Service SERVER:
+  /register_poi   drone_interfaces/RegisterPOI
+    Request:
+      uint32         tag_id
+      PoseStamped    world_pose
+      float32        confidence
+      string         detected_by
+    Response:
+      bool   is_new             true if this tag_id was never seen before
+      uint32 total_tags_found   running count of unique tags in the registry
+    Behavior:
+      If tag_id is new: add to registry, log "New tag N"
+      If tag_id known AND new confidence > stored confidence: update entry
+
+Topics WRITTEN:
+  /poi/detections   drone_interfaces/ArucoDetection   (1 Hz)
+      Re-publishes every known tag one message at a time.
+      Consumers (visualisation, task planner) can subscribe here to see
+      all discovered POIs without knowing which drone found them.
+
+Registry:  dict { tag_id (int) → best ArucoDetection seen so far }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  13. LAUNCH SEQUENCE (full_stack.launch.py)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  t= 0s   simulation.launch.py
+            → Gazebo world (maze.sdf)
+            → t+5s: spawn x500_d1
+            → t+7s: spawn x500_d2
+            → t+8s: ros_gz_bridge + robot_state_publishers (d1, d2)
+
+  t=10s   px4_multi.launch.py
+            → MicroXRCEAgent port 8888 (d1)
+            → MicroXRCEAgent port 8889 (d2)
+            → PX4 SITL instance 0 (x500_d1, ns=d1)
+            → PX4 SITL instance 1 (x500_d2, ns=d2)
+            (PX4 will take ~20s to boot and apply params)
+
+  t=12s   lio_sam_multi.launch.py
+            → lidar_enricher_d1, lidar_enricher_d2
+            → 4x LIO-SAM nodes for d1
+            → 4x LIO-SAM nodes for d2
+
+  t=15s   octomap.launch.py (d1)
+          octomap.launch.py (d2)
+          aruco_detector.launch.py (d1)
+          aruco_detector.launch.py (d2)
+
+  t=17s   frontier.launch.py (d1)
+          frontier.launch.py (d2)
+
+  t=20s   px4_offboard.launch.py
+            → visual_odom_bridge_d1, visual_odom_bridge_d2
+            → offboard_controller_d1, offboard_controller_d2
+            (PX4 is ~done booting, EKF2 starts receiving VIO)
+
+  t=22s   exploration_manager.launch.py
+            → exploration_planner_d1, exploration_planner_d2
+            → drone_coordinator
+            → poi_manager
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  14. COMPLETE DATA-FLOW DIAGRAM (both drones)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Gazebo
+ ├─ x500_d1 sensors ─────────────────────────────────────────────────────────┐
+ │    /d1/points_raw                                                         │
+ │    /d1/imu/data                                                           │
+ │    /d1/camera/image_raw + /d1/camera/camera_info                          │
+ └─ x500_d2 sensors (mirror /d2/*)                                           │
+                                                                             │
+PX4 SITL inst-0 ── MicroXRCE :8888 ──► /d1/fmu/out/vehicle_status            │
+                               	   ──► /d1/fmu/out/vehicle_local_position    │
+PX4 SITL inst-1 ── MicroXRCE :8889 ──► /d2/fmu/out/*                         │
+                                                                             │
+/d1/points_raw ──► lidar_enricher_d1 ──► /d1/points_enriched                │
+/d2/points_raw ──► lidar_enricher_d2 ──► /d2/points_enriched                │
+                                                                             │
+/d1/points_enriched ─┐                                                       │
+/d1/imu/data ────────┴──► LIO-SAM (d1, 4 nodes) ──► /d1/lio_sam/mapping/odometry
+                                                  ──► /d1/lio_sam/mapping/cloud_registered
+/d2/points_enriched ─┐                            ──► TF: d1/map→d1/odom→d1/base_link
+/d2/imu/data ────────┴──► LIO-SAM (d2, 4 nodes) ──► /d2/lio_sam/mapping/*
+
+/d1/lio_sam/.../odometry ──► visual_odom_bridge_d1 ──► /d1/fmu/in/vehicle_visual_odometry
+/d2/lio_sam/.../odometry ──► visual_odom_bridge_d2 ──► /d2/fmu/in/vehicle_visual_odometry
+                                                               │
+                                                   EKF2 fuses VIO + IMU
+                                                               │
+                                             /d1/fmu/out/vehicle_local_position (NED)
+
+/d1/fmu/out/vehicle_status_v1 ───────┐
+/d1/fmu/out/vehicle_local_position ──┤
+/d1/goal_pose ───────────────────────┤
+/d1/cmd/land ────────────────────────┴──► offboard_controller_d1
+    writes: /d1/fmu/in/offboard_control_mode   (10 Hz heartbeat)
+            /d1/fmu/in/trajectory_setpoint     (NED position/velocity target)
+            /d1/fmu/in/vehicle_command         (ARM, DISARM, SET_MODE)
+    ──────────────────────────────────────────────────────────► PX4 flies d1
+
+/d2/fmu/out/* + /d2/cmd/land ──► offboard_controller_d2 ──► /d2/fmu/in/* ──► PX4 flies d2
+
+/d1/lio_sam/.../cloud_registered ──► octomap_server_d1 ──► /d1/projected_map
+/d2/lio_sam/.../cloud_registered ──► octomap_server_d2 ──► /d2/projected_map
+
+/d1/camera/image_raw + camera_info ──► aruco_detector_d1 ──► /d1/aruco/detections
+/d2/camera/image_raw + camera_info ──► aruco_detector_d2 ──► /d2/aruco/detections
+
+/d1/projected_map ──► frontier_detector_d1 ──► /d1/frontiers/list
+                                           ──► /d1/frontiers/markers
+/d2/projected_map ──► frontier_detector_d2 ──► /d2/frontiers/list
+                                           ──► /d2/frontiers/markers
+
+/d1/lio_sam/.../odometry ──► exploration_planner_d1
+/d1/fmu/out/battery_status ──► exploration_planner_d1
+    service server: /d1/assign_frontier ◄──────────────────────────────┐
+    publishes: /d1/goal_pose ──────────────────────► offboard_ctrl_d1  │
+    publishes: /d1/drone_state ─────────────────────────────────────── │──┐
+                                                                       │  │
+/d2/lio_sam/.../odometry ──► exploration_planner_d2                   │  │
+/d2/fmu/out/battery_status ──► exploration_planner_d2                 │  │
+    service server: /d2/assign_frontier ◄─────────────────────────────┤  │
+    publishes: /d2/goal_pose ──────────────────────► offboard_ctrl_d2 │  │
+    publishes: /d2/drone_state ─────────────────────────────────────── │──┤
+                                                                       │  │
+/d1/frontiers/list ─────────────────────────────────────────────────── │──┤
+/d2/frontiers/list ─────────────────────────────────────────────────── │──┤
+/d1/drone_state ────────────────────────────────────────────────────── │──┤
+/d2/drone_state ───────────────────────────────────► drone_coordinator│  │
+   low battery? → publishes /d1/cmd/land, /d2/cmd/land                │  │
+   all idle + no frontiers? → publishes /mission_complete (latched)   │  │
+   scores frontiers, calls /d1/assign_frontier ────────────────────────┘  │
+                          /d2/assign_frontier ────────────────────────────┘
+
+/d1/aruco/detections ──┐
+/d2/aruco/detections ──┴──► poi_manager
+                                service server: /register_poi
+                                publishes: /poi/detections (1 Hz, all known tags)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  15. KEY FEEDBACK LOOPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LOOP 1 — EKF2 vision fusion
+  LIO-SAM builds map, estimates ENU pose
+  → visual_odom_bridge converts to NED
+  → PX4 EKF2 uses it as position estimate
+  → PX4 flies the drone
+  → drone moves to new position
+  → new LiDAR scan arrives
+  → LIO-SAM updates map and pose
+  → repeat
+
+LOOP 2 — Exploration
+  Drone flies → LiDAR scans new area
+  → cloud_registered grows
+  → OctoMap gains free cells
+  → projected_map shows new free/unknown boundaries
+  → frontier_detector finds new frontier cells, clusters them
+  → FrontierList gains new centroids
+  → coordinator scores them, assigns best to idle drone
+  → planner publishes goal_pose
+  → offboard_controller flies to goal
+  → new area is observed
+  → back to start
+
+LOOP 3 — Collision avoidance between drones
+  Both drones publish DroneState with current_goal
+  → coordinator reads both before assigning
+  → skips any frontier within 3m of another drone's current_goal
+  → drones naturally explore separate regions of the maze
+
+LOOP 4 — ArUco POI accumulation
+  Drone flies near a tag
+  → aruco_detector sees it in the camera frame
+  → solvePnP + TF2 → world pose in dX/map frame
+  → ArucoDetection published on /dX/aruco/detections
+  → poi_manager receives it
+  → if new tag_id: logged and stored
+  → if both drones see the same tag, only best confidence kept
+  → /poi/detections republishes all known tags at 1 Hz
+
+LOOP 5 — Battery monitoring and safe shutdown
+  PX4 SITL publishes BatteryStatus at ~1 Hz on /dX/fmu/out/battery_status
+  → exploration_planner reads msg.remaining, stores as battery_percent (0–100)
+  → DroneState carries battery_percent to drone_coordinator
+  → coordinator checks every second:
+       if 0 < battery_percent < low_battery_threshold (20%):
+         publish Empty to /dX/cmd/land
+         → offboard_controller enters LANDING state
+         → drone descends at 0.8 m/s NED +z
+         → when ned_z > -0.3 m: DISARM + transition to IDLE
+  → when all drones idle AND no new frontiers for 30 s:
+       coordinator publishes Bool(data=True) to /mission_complete (latched)
+       then publishes Empty to every /dX/cmd/land
+       → all drones land and disarm
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  16. NODE COUNT SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  gz sim                        1   Gazebo simulator
+  parameter_bridge              1   ros_gz_bridge
+  robot_state_publisher         2   one per drone
+  px4 (SITL)                    2   one per drone (external process)
+  MicroXRCEAgent                2   one per drone (external process)
+  lidar_enricher                2   one per drone
+  lio_sam_imuPreintegration     2   one per drone
+  lio_sam_imageProjection       2   one per drone
+  lio_sam_featureExtraction     2   one per drone
+  lio_sam_mapOptimization       2   one per drone
+  visual_odom_bridge            2   one per drone
+  offboard_controller           2   one per drone
+  octomap_server                2   one per drone
+  aruco_detector                2   one per drone
+  frontier_detector             2   one per drone
+  exploration_planner           2   one per drone
+  drone_coordinator             1   singleton
+  poi_manager                   1   singleton
+  rviz2                         1   optional visualisation
+  ─────────────────────────────────────────────────────
+  TOTAL ROS2 nodes:            ~31  (29 without RViz + external processes)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  17. LAUNCH COMMAND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  source install/setup.bash
+  ros2 launch drone_bringup full_stack.launch.py
+
+  Optional argument:
+  ros2 launch drone_bringup full_stack.launch.py use_rviz:=false
+
+================================================================================

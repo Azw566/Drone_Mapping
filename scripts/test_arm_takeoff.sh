@@ -56,8 +56,9 @@ warn()    { echo -e "${YELLOW}[WARN]${RESET} $*"; }
 fail()    { echo -e "${RED}[FAIL]${RESET} $*"; }
 
 # ── Args ──────────────────────────────────────────────────────────────────────
-USE_RVIZ="true"
+USE_RVIZ="false"
 for arg in "$@"; do
+    [[ "$arg" == "--rviz" ]] && USE_RVIZ="true"
     [[ "$arg" == "--no-rviz" ]] && USE_RVIZ="false"
 done
 

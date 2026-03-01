@@ -41,6 +41,7 @@ from launch.actions import (
     DeclareLaunchArgument,
     ExecuteProcess,
     IncludeLaunchDescription,
+    SetEnvironmentVariable,
     TimerAction,
 )
 from launch.conditions import IfCondition
@@ -118,8 +119,16 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'use_rviz',
-            default_value='true',
-            description='Launch RViz2 for visualisation'),
+            default_value='false',
+            description='Launch RViz2 for visualisation (default off for headless)'),
+
+        # Force headless Gazebo to avoid GLX issues and reduce CPU/GPU load
+        SetEnvironmentVariable('GZ_HEADLESS', '1'),
+        # Restrict CycloneDDS to loopback to cut multicast jitter
+        SetEnvironmentVariable('CYCLONEDDS_URI',
+            '<CycloneDDS><Domain><General>'
+            '<Interfaces><NetworkInterface name="lo"/></Interfaces>'
+            '</General></Domain></CycloneDDS>'),
 
         # t=0s  — Gazebo world + drone spawning + bridge (internal timers)
         simulation,

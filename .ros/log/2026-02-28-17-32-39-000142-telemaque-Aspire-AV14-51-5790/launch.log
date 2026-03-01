@@ -1,0 +1,73 @@
+1772296359.0015235 [INFO] [launch]: All log files can be found below /home/telemaque/ros_ws/drone/.ros/log/2026-02-28-17-32-39-000142-telemaque-Aspire-AV14-51-5790
+1772296359.0017364 [INFO] [launch]: Default logging verbosity is set to INFO
+1772296359.6319046 [INFO] [gz-1]: process started with pid [5870]
+1772296364.6391611 [INFO] [gz-2]: process started with pid [5929]
+1772296365.0777628 [INFO] [gz-2]: process has finished cleanly [pid 5929]
+1772296367.6655819 [INFO] [parameter_bridge-3]: process started with pid [6021]
+1772296367.6660819 [INFO] [robot_state_publisher-4]: process started with pid [6023]
+1772296367.6662424 [INFO] [robot_state_publisher-5]: process started with pid [6025]
+1772296368.6379042 [INFO] [gz-6]: process started with pid [6072]
+1772296369.0195940 [INFO] [gz-6]: process has finished cleanly [pid 6072]
+1772296369.6445107 [INFO] [xrce_agent_port8888-7]: process started with pid [6091]
+1772296369.6448905 [INFO] [xrce_agent_port8889-8]: process started with pid [6093]
+1772296369.6451333 [INFO] [px4_d1-9]: process started with pid [6095]
+1772296371.6946540 [INFO] [lidar_enricher.py-10]: process started with pid [6290]
+1772296371.6953278 [INFO] [lio_sam_imuPreintegration-11]: process started with pid [6292]
+1772296371.6958387 [INFO] [lio_sam_imageProjection-12]: process started with pid [6294]
+1772296371.6962483 [INFO] [lio_sam_featureExtraction-13]: process started with pid [6296]
+1772296371.6965880 [INFO] [lio_sam_mapOptimization-14]: process started with pid [6298]
+1772296371.6970210 [INFO] [lidar_enricher.py-15]: process started with pid [6300]
+1772296371.6974037 [INFO] [lio_sam_imuPreintegration-16]: process started with pid [6302]
+1772296371.6977689 [INFO] [lio_sam_imageProjection-17]: process started with pid [6304]
+1772296371.6981390 [INFO] [lio_sam_featureExtraction-18]: process started with pid [6306]
+1772296371.6985352 [INFO] [lio_sam_mapOptimization-19]: process started with pid [6308]
+1772296371.6990321 [INFO] [gcs_heartbeat-20]: process started with pid [6310]
+1772296374.6719735 [INFO] [octomap_server_node-21]: process started with pid [6521]
+1772296374.6723545 [INFO] [octomap_server_node-22]: process started with pid [6523]
+1772296374.6725593 [INFO] [aruco_detector-23]: process started with pid [6525]
+1772296374.6727350 [INFO] [aruco_detector-24]: process started with pid [6527]
+1772296374.6741068 [INFO] [px4_d2-25]: process started with pid [6529]
+1772296376.6754751 [INFO] [frontier_detector-26]: process started with pid [6788]
+1772296376.6761053 [INFO] [frontier_detector-27]: process started with pid [6790]
+1772296389.6971636 [INFO] [visual_odom_bridge-28]: process started with pid [7281]
+1772296389.6978629 [INFO] [visual_odom_bridge-29]: process started with pid [7283]
+1772296389.6983624 [INFO] [offboard_controller-30]: process started with pid [7285]
+1772296389.6988249 [INFO] [offboard_controller-31]: process started with pid [7288]
+1772296392.6697013 [INFO] [exploration_planner-32]: process started with pid [7392]
+1772296392.6703603 [INFO] [exploration_planner-33]: process started with pid [7399]
+1772296392.6708043 [INFO] [drone_coordinator-34]: process started with pid [7401]
+1772296392.6711788 [INFO] [poi_manager-35]: process started with pid [7403]
+1772296401.8703327 [WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+1772296402.0086613 [ERROR] [xrce_agent_port8889-8]: process has died [pid 6093, exit code -2, cmd '/home/telemaque/Micro-XRCE-DDS-Agent/build/MicroXRCEAgent udp4 -p 8889'].
+1772296402.0103939 [ERROR] [px4_d2-25]: process has died [pid 6529, exit code 130, cmd 'bash /home/telemaque/ros_ws/drone/install/drone_bringup/lib/drone_bringup/launch_px4_instance.sh 1 x500_d2 d2'].
+1772296402.0115540 [ERROR] [px4_d1-9]: process has died [pid 6095, exit code 130, cmd 'bash /home/telemaque/ros_ws/drone/install/drone_bringup/lib/drone_bringup/launch_px4_instance.sh 0 x500_d1 d1'].
+1772296402.0120094 [ERROR] [gcs_heartbeat-20]: process has died [pid 6310, exit code -2, cmd 'python3 /home/telemaque/ros_ws/drone/install/drone_bringup/lib/drone_bringup/gcs_heartbeat.py 2'].
+1772296402.0124011 [ERROR] [xrce_agent_port8888-7]: process has died [pid 6091, exit code -2, cmd '/home/telemaque/Micro-XRCE-DDS-Agent/build/MicroXRCEAgent udp4 -p 8888'].
+1772296402.1838980 [INFO] [parameter_bridge-3]: process has finished cleanly [pid 6021]
+1772296402.2882376 [INFO] [lio_sam_featureExtraction-18]: process has finished cleanly [pid 6306]
+1772296402.3006942 [INFO] [lio_sam_imageProjection-12]: process has finished cleanly [pid 6294]
+1772296402.3486981 [INFO] [robot_state_publisher-5]: process has finished cleanly [pid 6025]
+1772296402.3532076 [INFO] [robot_state_publisher-4]: process has finished cleanly [pid 6023]
+1772296402.4020755 [INFO] [lio_sam_imageProjection-17]: process has finished cleanly [pid 6304]
+1772296402.4078562 [INFO] [lio_sam_featureExtraction-13]: process has finished cleanly [pid 6296]
+1772296402.4102983 [INFO] [octomap_server_node-21]: process has finished cleanly [pid 6521]
+1772296402.4221292 [INFO] [lio_sam_mapOptimization-14]: process has finished cleanly [pid 6298]
+1772296402.4249282 [INFO] [lio_sam_mapOptimization-19]: process has finished cleanly [pid 6308]
+1772296402.4597075 [INFO] [lio_sam_imuPreintegration-16]: process has finished cleanly [pid 6302]
+1772296402.4646776 [INFO] [octomap_server_node-22]: process has finished cleanly [pid 6523]
+1772296402.4981325 [INFO] [lio_sam_imuPreintegration-11]: process has finished cleanly [pid 6292]
+1772296402.7038817 [ERROR] [visual_odom_bridge-29]: process has died [pid 7283, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/px4_offboard/lib/px4_offboard/visual_odom_bridge --ros-args -r __node:=visual_odom_bridge_d2 --params-file /tmp/launch_params_6ba6jezu'].
+1772296402.7845812 [ERROR] [drone_coordinator-34]: process has died [pid 7401, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/exploration_manager/lib/exploration_manager/drone_coordinator --ros-args -r __node:=drone_coordinator --params-file /tmp/launch_params_j0y2yren'].
+1772296402.7909613 [ERROR] [frontier_detector-26]: process has died [pid 6788, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/frontier_detector/lib/frontier_detector/frontier_detector --ros-args -r __node:=frontier_detector --params-file /tmp/launch_params_ccl3svok'].
+1772296402.8106804 [ERROR] [visual_odom_bridge-28]: process has died [pid 7281, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/px4_offboard/lib/px4_offboard/visual_odom_bridge --ros-args -r __node:=visual_odom_bridge_d1 --params-file /tmp/launch_params_ro9_7p2c'].
+1772296402.8509259 [INFO] [gz-1]: process has finished cleanly [pid 5870]
+1772296402.8563323 [ERROR] [lidar_enricher.py-15]: process has died [pid 6300, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/drone_bringup/lib/drone_bringup/lidar_enricher.py --ros-args -r __node:=lidar_enricher_d2 --params-file /tmp/launch_params_45a6iand'].
+1772296403.0014360 [ERROR] [offboard_controller-31]: process has died [pid 7288, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/px4_offboard/lib/px4_offboard/offboard_controller --ros-args -r __node:=offboard_controller_d2 --params-file /tmp/launch_params_5_cyd2g_'].
+1772296403.0023742 [ERROR] [exploration_planner-32]: process has died [pid 7392, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/exploration_manager/lib/exploration_manager/exploration_planner --ros-args -r __node:=exploration_planner_d1 --params-file /tmp/launch_params_gbxdsy5i'].
+1772296403.0276232 [ERROR] [lidar_enricher.py-10]: process has died [pid 6290, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/drone_bringup/lib/drone_bringup/lidar_enricher.py --ros-args -r __node:=lidar_enricher_d1 --params-file /tmp/launch_params_3oi74gt_'].
+1772296403.0289881 [ERROR] [aruco_detector-23]: process has died [pid 6525, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/aruco_detector/lib/aruco_detector/aruco_detector --ros-args -r __node:=aruco_detector_d1 --params-file /tmp/launch_params_ad6nzqma'].
+1772296403.0330043 [ERROR] [offboard_controller-30]: process has died [pid 7285, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/px4_offboard/lib/px4_offboard/offboard_controller --ros-args -r __node:=offboard_controller_d1 --params-file /tmp/launch_params_9x2sbpk6'].
+1772296403.0432861 [ERROR] [poi_manager-35]: process has died [pid 7403, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/exploration_manager/lib/exploration_manager/poi_manager --ros-args -r __node:=poi_manager --params-file /tmp/launch_params_6lw2trqp'].
+1772296403.0818183 [ERROR] [frontier_detector-27]: process has died [pid 6790, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/frontier_detector/lib/frontier_detector/frontier_detector --ros-args -r __node:=frontier_detector --params-file /tmp/launch_params_1hpm1oq9'].
+1772296403.0855689 [ERROR] [exploration_planner-33]: process has died [pid 7399, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/exploration_manager/lib/exploration_manager/exploration_planner --ros-args -r __node:=exploration_planner_d2 --params-file /tmp/launch_params_1xk31vd5'].
+1772296403.1566684 [ERROR] [aruco_detector-24]: process has died [pid 6527, exit code 1, cmd '/home/telemaque/ros_ws/drone/install/aruco_detector/lib/aruco_detector/aruco_detector --ros-args -r __node:=aruco_detector_d2 --params-file /tmp/launch_params_xsjc6qe2'].

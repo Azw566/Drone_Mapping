@@ -1,0 +1,1 @@
+[INFO] [1772295626.188941764] [lidar_enricher_d2]: Enriching /d2/points_raw → /d2/points_enriched (n_scan=16, horizon=1800, rate=10.0 Hz)

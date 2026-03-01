@@ -31,8 +31,8 @@ def generate_launch_description():
     bridge_config = os.path.join(pkg_dir, 'config', 'bridge.yaml')
 
     use_rviz_arg = DeclareLaunchArgument(
-        'use_rviz', default_value='true',
-        description='Launch RViz2 for visualization'
+        'use_rviz', default_value='false',
+        description='Launch RViz2 for visualization (default: off for headless)'
     )
     headless_arg = DeclareLaunchArgument(
         'headless', default_value='false',
@@ -111,6 +111,8 @@ def generate_launch_description():
         executable='parameter_bridge',
         name='gz_bridge',
         parameters=[{'config_file': bridge_config}],
+        arguments=['--ros-args', '--log-level', 'error'],
+        additional_env={'GZ_LOG_LEVEL': 'error'},
         output='screen',
     )
 

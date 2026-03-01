@@ -26,6 +26,7 @@ from launch.actions import (
     SetEnvironmentVariable,
     TimerAction,
 )
+from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
@@ -37,9 +38,16 @@ def _pkg_launch(pkg: str, launch_file: str, args: dict | None = None):
 
 
 def generate_launch_description():
+    use_rviz = LaunchConfiguration('use_rviz')
+
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz', default_value='false',
+        description='Launch RViz2 for visualization (default off for headless)'
+    )
+
     # ── Gazebo world + drone spawning + ros_gz_bridge ─────────────────────────
     simulation = _pkg_launch('drone_bringup', 'simulation.launch.py',
-                             {'use_rviz': 'true'})
+                             {'use_rviz': use_rviz})
 
     # ── PX4 SITL (x2) + MicroXRCE-DDS agents (x2) ────────────────────────────
     px4 = _pkg_launch('drone_bringup', 'px4_multi.launch.py')
@@ -72,6 +80,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        use_rviz_arg,
         # Run Gazebo server-only (no GUI) to free ~40% CPU.
         # On a loaded system, gz sim gui prevents physics from running at real-time,
         # which causes PX4 XRCE-DDS timesync to oscillate → OFFBOARD loss → drone lands.

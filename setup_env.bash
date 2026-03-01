@@ -18,6 +18,11 @@ export PX4_DIR=~/px4_workspace/PX4-Autopilot
 export PX4_GZ_MODEL_NAME=x500_vision_lidar
 export PX4_GZ_WORLD=maze
 
+# Logging + Gazebo home (keep writable inside repo)
+export GZ_HOMEDIR="$REPO_ROOT/.gz"
+export ROS_LOG_DIR="$REPO_ROOT/.ros/log"
+mkdir -p "$GZ_HOMEDIR" "$ROS_LOG_DIR"
+
 # Add your repo's models and worlds to Gazebo's path
 export GZ_SIM_RESOURCE_PATH="$REPO_ROOT/models:$REPO_ROOT/worlds:$GZ_SIM_RESOURCE_PATH"
 

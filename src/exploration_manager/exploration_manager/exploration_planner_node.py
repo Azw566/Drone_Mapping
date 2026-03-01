@@ -27,6 +27,7 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Point, PoseStamped
 from drone_interfaces.msg import FrontierList, DroneState
 from drone_interfaces.srv import AssignFrontier
+from px4_msgs.msg import BatteryStatus
 
 _STATUS_IDLE      = 'idle'
 _STATUS_EXPLORING = 'exploring'
@@ -58,6 +59,9 @@ class ExplorationPlannerNode(Node):
         self.create_subscription(
             Odometry, f'/{ns}/lio_sam/mapping/odometry', self._odom_cb,
             _best_effort_qos)
+        self.create_subscription(
+            BatteryStatus, f'/{ns}/fmu/out/battery_status',
+            self._battery_cb, _best_effort_qos)
 
         # ── Service server ───────────────────────────────────────────────────
         self._srv = self.create_service(
@@ -68,7 +72,6 @@ class ExplorationPlannerNode(Node):
         self._goal     = None               # current goal (geometry_msgs/Point)
         self._status   = _STATUS_IDLE
         self._battery  = 100.0
-        self._drain    = 0.02               # %/s
 
         self.create_timer(0.5, self._publish_state)
         self.create_timer(0.1, self._tick)
@@ -79,6 +82,11 @@ class ExplorationPlannerNode(Node):
     def _odom_cb(self, msg: Odometry):
         p = msg.pose.pose.position
         self._pos_enu = [p.x, p.y, p.z]
+
+    def _battery_cb(self, msg: BatteryStatus):
+        if msg.remaining < 0.0:
+            return  # -1 = unknown; keep last value
+        self._battery = max(0.0, min(100.0, msg.remaining * 100.0))
 
     def _assign_cb(self, req: AssignFrontier.Request,
                    res: AssignFrontier.Response) -> AssignFrontier.Response:
@@ -96,9 +104,6 @@ class ExplorationPlannerNode(Node):
 
     # ── Tick ───────────────────────────────────────────────────────────────
     def _tick(self):
-        self._battery -= self._drain * 0.1
-        self._battery  = max(0.0, self._battery)
-
         if self._status == _STATUS_EXPLORING and self._goal is not None:
             # Re-publish goal at each tick so late-joining controller gets it
             self._pub_goal.publish(self._goal)
