@@ -1,7 +1,0 @@
-[INFO] [1772291362.999633987] [offboard_controller_d2]: [d2] OffboardController ready (hover=3.0 m)
-[INFO] [1772291365.319848862] [offboard_controller_d2]: [d2] Home NED: [-0.04289862513542175, -0.013166495598852634, -0.0007627606391906738]
-[INFO] [1772291365.372484626] [offboard_controller_d2]: [d2] → PRE_ARM
-[INFO] [1772291367.473047911] [offboard_controller_d2]: [d2] → SWITCHING (request OFFBOARD mode)
-[INFO] [1772291367.572585046] [offboard_controller_d2]: [d2] → ARMING (OFFBOARD confirmed, now arm)
-[INFO] [1772291367.672576047] [offboard_controller_d2]: [d2] → TAKING_OFF (armed in OFFBOARD)
-[INFO] [1772291375.572324365] [offboard_controller_d2]: [d2] → HOVER

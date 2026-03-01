@@ -1,3 +1,0 @@
-[WARN] [1772295898.743245001] [rcl.logging_rosout]: Publisher already registered for provided node name. If this is due to multiple nodes with the same name then all logs for that logger name will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
-[INFO] [1772295899.539496204] [rclcpp]: [1;32m----> IMU Preintegration Started.[0m
-[INFO] [1772296222.982734774] [rclcpp]: signal_handler(SIGINT/SIGTERM)
