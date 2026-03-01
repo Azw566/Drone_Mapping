@@ -1,6 +1,0 @@
-[INFO] [1772296367.835114381] [d2.robot_state_publisher]: got segment base_link
-[INFO] [1772296367.835385980] [d2.robot_state_publisher]: got segment camera_link
-[INFO] [1772296367.835410756] [d2.robot_state_publisher]: got segment camera_optical_frame
-[INFO] [1772296367.835424893] [d2.robot_state_publisher]: got segment imu_link
-[INFO] [1772296367.835439204] [d2.robot_state_publisher]: got segment lidar_link
-[INFO] [1772296401.881788599] [rclcpp]: signal_handler(SIGINT/SIGTERM)

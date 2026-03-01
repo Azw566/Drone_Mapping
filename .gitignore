@@ -1,0 +1,37 @@
+# ROS 2 build artefacts
+build/
+install/
+log/
+
+# ROS 2 runtime logs
+.ros/
+
+# Gazebo home dir (worlds cache, fuel models, state)
+.gz/
+
+# PX4 SITL scratch dirs
+/tmp/px4_sitl_*/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+*.so
+
+# C++ build outputs
+*.o
+*.a
+*.d
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Colcon
+.colcon_install_layout
