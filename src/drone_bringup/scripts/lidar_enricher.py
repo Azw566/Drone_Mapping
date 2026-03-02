@@ -97,6 +97,11 @@ class LidarEnricher(Node):
             fields_out.append(PointField(name='ring', offset=offset,
                                          datatype=PointField.UINT16, count=1))
             offset += 2
+            # Pad to 4-byte boundary so the following FLOAT32 is aligned.
+            # Without this, LIO-SAM reads 'time' from a misaligned offset and
+            # discards every scan (all-NaN timestamps).
+            if offset % 4 != 0:
+                offset += 4 - (offset % 4)
         if not has_time:
             fields_out.append(PointField(name='time', offset=offset,
                                          datatype=PointField.FLOAT32, count=1))

@@ -95,6 +95,9 @@ class ArucoDetectorNode(Node):
         self.create_subscription(Image,      image_topic, self._image_cb, 5)
         self._pub = self.create_publisher(ArucoDetection, output_topic, 10)
 
+        # Per-tag log throttle: avoid spamming at camera frame rate
+        self._last_logged: dict[int, float] = {}
+
         self.get_logger().info(
             f'ArUco detector ready | drone={self.drone_id} '
             f'| image={image_topic} | output={output_topic}'
@@ -179,6 +182,17 @@ class ArucoDetectorNode(Node):
             det.confidence  = self._confidence(corners[i])
             det.detected_by = self.drone_id
             self._pub.publish(det)
+
+            # Log — throttled per tag_id to avoid flooding at camera frame rate
+            t_now = self.get_clock().now().nanoseconds * 1e-9
+            if t_now - self._last_logged.get(int(marker_id), 0.0) > 5.0:
+                self._last_logged[int(marker_id)] = t_now
+                p = pose_world.pose.position
+                self.get_logger().info(
+                    f'[{self.drone_id}] ArUco tag #{marker_id} detected — '
+                    f'world pos ({p.x:.2f}, {p.y:.2f}, {p.z:.2f}) m  '
+                    f'confidence={det.confidence:.2f}'
+                )
 
     # ── Helpers ───────────────────────────────────────────────────────────
 

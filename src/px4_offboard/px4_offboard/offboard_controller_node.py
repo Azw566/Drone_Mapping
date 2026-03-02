@@ -59,7 +59,7 @@ _EXPLORING   = 'exploring'
 _LANDING     = 'landing'
 
 # Config
-HOVER_ALT_M      = 3.0    # metres above takeoff (NED z = -HOVER_ALT_M)
+HOVER_ALT_M      = 1.5    # metres above takeoff (NED z = -HOVER_ALT_M)
 GOAL_RADIUS_M    = 0.5    # consider goal reached when within this distance
 PRE_ARM_SECS     = 2.0    # seconds of publishing before arming
 TAKEOFF_VEL_MS   = 1.5    # vertical climb speed during TAKING_OFF (m/s, NED -z)

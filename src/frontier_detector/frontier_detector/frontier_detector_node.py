@@ -30,6 +30,7 @@ class FrontierDetector(Node):
         self.timer = self.create_timer(1.0 / rate, self.publish_frontiers)
 
         self.latest_grid = None
+        self._prev_cluster_count = -1
 
     def map_cb(self, msg: OccupancyGrid):
         self.latest_grid = msg
@@ -62,6 +63,9 @@ class FrontierDetector(Node):
                             break
 
         if not is_frontier:
+            if self._prev_cluster_count > 0:
+                self.get_logger().info('Frontiers: none detected — area fully covered or map too sparse')
+                self._prev_cluster_count = 0
             return
 
         # ── Step 2: BFS cluster frontier cells into connected components ──
@@ -109,6 +113,14 @@ class FrontierDetector(Node):
             fl.centroids.append(pt)
             fl.sizes.append(float(len(cluster)))
         self.frontier_pub.publish(fl)
+
+        n = len(clusters)
+        if n != self._prev_cluster_count:
+            self.get_logger().info(
+                f'Frontiers: {n} cluster(s) detected '
+                f'(total cells: {sum(len(c) for c in clusters)})'
+            )
+            self._prev_cluster_count = n
 
         # ── Step 5: publish MarkerArray (all cells coloured by cluster) ───
         markers = MarkerArray()
