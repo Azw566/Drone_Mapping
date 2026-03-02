@@ -24,7 +24,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from nav_msgs.msg import Odometry
-from px4_msgs.msg import VehicleOdometry
+from px4_msgs.msg import VehicleOdometry, VehicleLocalPosition
 
 # √2 / 2
 _SQRT2_2 = math.sqrt(2.0) / 2.0
@@ -75,12 +75,32 @@ class VisualOdomBridgeNode(Node):
             depth=10,
         )
 
+        self._px4_us = 0   # latest PX4 clock value (µs), updated from vehicle_local_position
+
         self.pub = self.create_publisher(VehicleOdometry, vio_topic, px4_qos)
         self.sub = self.create_subscription(
             Odometry, odom_topic, self._cb, lio_qos)
+        self.create_subscription(
+            VehicleLocalPosition, f'/{ns}/fmu/out/vehicle_local_position',
+            self._lp_cb, px4_qos)
 
         self.get_logger().info(
             f'[{ns}] VisualOdomBridge: {odom_topic} → {vio_topic}')
+
+    def _lp_cb(self, msg: VehicleLocalPosition):
+        """Track PX4's internal clock from vehicle_local_position timestamps."""
+        self._px4_us = msg.timestamp
+
+    def _now_us(self) -> int:
+        """Return a timestamp in PX4 microseconds.
+
+        Prefer PX4's own clock (read from VehicleLocalPosition) to avoid
+        stale-message rejection caused by Gazebo/ROS2 clock drift under load.
+        Falls back to the ROS2 clock before the first VehicleLocalPosition arrives.
+        """
+        if self._px4_us > 0:
+            return self._px4_us
+        return self.get_clock().now().nanoseconds // 1000
 
     def _cb(self, msg: Odometry):
         # ── Position ENU → NED ───────────────────────────────────────────────
@@ -104,7 +124,7 @@ class VisualOdomBridgeNode(Node):
         vz_e = msg.twist.twist.linear.z
 
         out = VehicleOdometry()
-        out.timestamp        = self.get_clock().now().nanoseconds // 1000
+        out.timestamp        = self._now_us()
         out.timestamp_sample = out.timestamp
         out.pose_frame       = VehicleOdometry.POSE_FRAME_NED
 

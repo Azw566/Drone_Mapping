@@ -73,7 +73,15 @@ class DroneCoordinatorNode(Node):
                 AssignFrontier, f'/{ns}/assign_frontier',
                 callback_group=cbg)
             self._land_pubs[ns] = self.create_publisher(Empty, f'/{ns}/cmd/land', 10)
-            self._last_frontier_time[ns] = float('inf')
+            # Initialise to current ROS time so the no-frontier timeout is
+            # measured from node start, not from the epoch.  This prevents the
+            # coordinator from declaring mission-complete before the first
+            # frontier message ever arrives (which would happen with 0.0 because
+            # now_s >> no_frontier_timeout right from the first tick).
+            # If a drone's map pipeline never starts, this timestamp simply ages
+            # out after no_frontier_timeout seconds from node startup, which is
+            # the desired "don't block forever" behaviour.
+            self._last_frontier_time[ns] = self.get_clock().now().nanoseconds * 1e-9
 
         # Latched publisher for mission-complete signal
         _latch = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -112,8 +120,14 @@ class DroneCoordinatorNode(Node):
         all_reported = len(self._states) == len(self._namespaces)
         all_idle = all_reported and all(
             s.status == _STATUS_IDLE for s in self._states.values())
+        # A drone counts as "no frontiers" if:
+        #   (a) it has sent at least one frontier message but the last one was
+        #       more than no_frontier_timeout seconds ago, OR
+        #   (b) its map pipeline never started — we give it no_frontier_timeout
+        #       seconds from node start (now_s − 0.0) before declaring it done,
+        #       which prevents a broken drone from blocking mission completion
+        #       indefinitely.
         no_frontiers = all(
-            self._last_frontier_time[ns] != float('inf') and
             (now_s - self._last_frontier_time[ns]) > self._no_frontier_timeout
             for ns in self._namespaces)
         if all_idle and no_frontiers:

@@ -59,7 +59,7 @@ echo "[PX4-${NS}] instance=${INSTANCE} model=${MODEL_NAME} rootfs=${BUILD_DIR}"
 
 # ── Inject custom parameters via stdin pipe ──────────────────────────────────
 # The co-process below feeds PX4's interactive shell.
-# We wait 20 s for PX4 to finish its boot sequence before sending commands.
+# We wait 5 s for PX4 to finish its boot sequence before sending commands.
 # "sleep infinity" keeps the pipe open so PX4 doesn't receive EOF.
 {
     sleep 5    # wait for PX4 to fully boot before injecting params (SITL boots in ~3 s)
@@ -89,14 +89,30 @@ echo "[PX4-${NS}] instance=${INSTANCE} model=${MODEL_NAME} rootfs=${BUILD_DIR}"
     echo "param set BAT_CRIT_THR 0.05"       # critical threshold 5% (default 7%)
     echo "param set BAT_EMERGEN_THR 0.01"    # emergency threshold 1% (default 5%)
 
-    # EKF2: use GPS for arming (LIO-SAM VIO integration is a separate concern).
-    # EKF2_EV_CTRL left at default (0) so EKF2 initialises from GPS immediately.
-    # Note: EKF2_EV_CTRL=15 to blend VIO cannot be set here because LIO-SAM
-    # needs ~30 s to initialise; setting it before VIO flows causes ekf2 missing data.
+    # EKF2: initialise from GPS only. VIO fusion (EKF2_EV_CTRL=15) is enabled
+    # in Phase 2 below, after LIO-SAM has had time to produce stable odometry.
 
     echo "param save"                        # persist params to SITL EEPROM
 
     echo "[PX4-${NS}] custom parameters applied." >&2
+
+    # ── Phase 2: enable VIO fusion once LIO-SAM is stable ───────────────
+    # LIO-SAM starts at t≈12 s (full-stack launch) and needs ~30 s to
+    # initialise. Setting EKF2_EV_CTRL before VIO data flows causes EKF2
+    # to log "missing EV data" and may desync the estimator. We wait until
+    # t≈50 s (d1) / t≈55 s (d2) before enabling it.
+    #
+    # EKF2_HGT_REF=0 (GPS height) is kept as the primary height source so
+    # the drone retains a valid height estimate if LIO-SAM lags behind.
+    # EKF2_EV_DELAY=200 accounts for LIO-SAM processing latency (~100–200 ms).
+    sleep 35   # 5 s (phase 1) + 35 s = 40 s from PX4 boot → t≈50 s in full-stack
+
+    echo "param set EKF2_EV_CTRL 15"        # fuse VIO: horiz pos + vert pos + vel + yaw
+    echo "param set EKF2_HGT_REF 0"         # keep GPS as primary height reference
+    echo "param set EKF2_EV_DELAY 200"      # LIO-SAM processing latency (ms)
+    echo "param save"
+
+    echo "[PX4-${NS}] VIO fusion enabled (EKF2_EV_CTRL=15)." >&2
 
     # Keep the pipe alive — DO NOT send EOF
     sleep infinity

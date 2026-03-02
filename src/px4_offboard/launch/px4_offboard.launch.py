@@ -27,7 +27,7 @@ def _controller(ns: str) -> Node:
         package='px4_offboard',
         executable='offboard_controller',
         name=f'offboard_controller_{ns}',
-        parameters=[{'drone_ns': ns, 'hover_alt': 3.0}],
+        parameters=[{'drone_ns': ns, 'hover_alt': 1.5}],
         output='screen',
     )
 

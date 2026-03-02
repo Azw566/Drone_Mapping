@@ -30,8 +30,8 @@ Start sequence (timers wait for upstream to be ready)
   t=15s  OctoMap servers  (needs cloud_registered from LIO-SAM)
   t=15s  ArUco detectors  (needs camera topics from bridge)
   t=17s  Frontier detectors (needs projected_map from OctoMap)
-  t=20s  Offboard controllers (PX4 ~done booting, EKF2 receiving VIO)
-  t=22s  Exploration planners + coordinator + POI manager
+  t=30s  Offboard controllers (PX4 ~done booting, EKF2 receiving VIO)
+  t=33s  Exploration planners + coordinator + POI manager
 """
 
 import os
@@ -60,8 +60,9 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration('use_rviz')
 
     # ── Simulation: Gazebo + spawning + bridge + RSPs ─────────────────────
+    headless = LaunchConfiguration('headless')
     simulation = _include('drone_bringup', 'simulation.launch.py',
-                          {'use_rviz': use_rviz})
+                          {'use_rviz': use_rviz, 'headless': headless})
 
     # ── PX4 SITL + MicroXRCE agents ───────────────────────────────────────
     px4 = _include('drone_bringup', 'px4_multi.launch.py')
@@ -120,10 +121,12 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_rviz',
             default_value='false',
-            description='Launch RViz2 for visualisation (default off for headless)'),
+            description='Launch RViz2 for visualisation'),
+        DeclareLaunchArgument(
+            'headless',
+            default_value='false',
+            description='Run Gazebo server-only without GUI (auto-detected if no DISPLAY)'),
 
-        # Force headless Gazebo to avoid GLX issues and reduce CPU/GPU load
-        SetEnvironmentVariable('GZ_HEADLESS', '1'),
         # Restrict CycloneDDS to loopback to cut multicast jitter
         SetEnvironmentVariable('CYCLONEDDS_URI',
             '<CycloneDDS><Domain><General>'
