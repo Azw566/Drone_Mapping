@@ -39,8 +39,14 @@ def generate_launch_description():
         description='Force Gazebo to run server-only (no GUI) regardless of display'
     )
 
+    # PX4 models directory — required so the <include><uri>x500</uri></include>
+    # inside x500_vision_lidar/model.sdf can be resolved at spawn time.
+    _px4_dir = os.environ.get('PX4_DIR',
+                              '/home/telemaque/px4_workspace/PX4-Autopilot')
+    _px4_models = os.path.join(_px4_dir, 'Tools', 'simulation', 'gz', 'models')
+
     gz_resource_path = os.environ.get('GZ_SIM_RESOURCE_PATH', '')
-    os.environ['GZ_SIM_RESOURCE_PATH'] = f"{model_path}:{gz_resource_path}"
+    os.environ['GZ_SIM_RESOURCE_PATH'] = f"{model_path}:{_px4_models}:{gz_resource_path}"
 
     # Run headless (server-only) when:
     #   (a) no display is available, OR
@@ -111,8 +117,8 @@ def generate_launch_description():
         executable='parameter_bridge',
         name='gz_bridge',
         parameters=[{'config_file': bridge_config}],
-        arguments=['--ros-args', '--log-level', 'error'],
-        additional_env={'GZ_LOG_LEVEL': 'error'},
+        ros_arguments=['--log-level', 'warn'],
+        additional_env={'GZ_LOG_LEVEL': 'warn'},
         output='screen',
     )
 

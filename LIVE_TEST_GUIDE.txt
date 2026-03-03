@@ -1,0 +1,417 @@
+════════════════════════════════════════════════════════════════════════════════
+  LIVE PIPELINE TEST GUIDE — Multi-Drone Autonomous Exploration
+  Tests everything requiring Gazebo / PX4 that the mock test cannot cover.
+  Run each phase in order. Each phase has explicit PASS / FAIL criteria.
+════════════════════════════════════════════════════════════════════════════════
+
+Prerequisites (run once before any phase)
+──────────────────────────────────────────
+  source /opt/ros/humble/setup.bash
+  cd ~/ros_ws/drone
+  colcon build --symlink-install --packages-select drone_bringup drone_slam \
+                                                   drone_interfaces px4_offboard \
+                                                   exploration_manager octomap_pipeline \
+                                                   frontier_detector aruco_detector
+  source install/setup.bash
+
+CLEANUP COMMAND (run between every phase to start fresh)
+─────────────────────────────────────────────────────────
+  ps aux | grep -E "(gz sim|px4|MicroXRCE|offboard|gcs_heartbeat|lio_sam|octomap|frontier|aruco|exploration)" \
+    | grep -v grep | awk '{print $2}' | xargs -r kill -9
+  sleep 3
+  rm -rf /tmp/px4_sitl_0 /tmp/px4_sitl_1
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PHASE 1 — Gazebo Bridge: Sensor Data
+  Goal: confirm /d1/points_raw, /d1/imu/data arrive from Gazebo
+════════════════════════════════════════════════════════════════════════════════
+
+[Terminal 1] Launch Gazebo + bridge only (no PX4, no SLAM):
+  ros2 launch drone_bringup simulation.launch.py
+
+Wait 15 s for Gazebo to load the maze and spawn x500_d1 and x500_d2.
+
+[Terminal 2] Check Gazebo sensor topics exist:
+  gz topic -l | grep -E "(vlp16|imu_sensor|rgb_camera)"
+
+  PASS: you see three lines per drone, e.g.:
+    /world/maze/model/x500_d1/link/lidar_link/sensor/vlp16/scan/points
+    /world/maze/model/x500_d1/link/base_link/sensor/imu_sensor/imu
+    /world/maze/model/x500_d1/link/camera_link/sensor/rgb_camera/image
+
+  FAIL: no output → model did not spawn.
+    Fix: check GZ_SIM_RESOURCE_PATH includes PX4 models dir (simulation.launch.py lines 44-49)
+
+[Terminal 2] Check bridged ROS topics:
+  ros2 topic hz /d1/points_raw       # expect ~10 Hz
+  ros2 topic hz /d1/imu/data         # expect ~100–200 Hz
+  ros2 topic hz /d2/points_raw       # expect ~10 Hz
+
+  PASS: all show > 0 Hz
+  FAIL: 0 Hz → bridge.yaml misconfiguration or Gazebo sensor not publishing.
+    Run: python3 scripts/diagnose_pipeline.py --ns d1  (will show which link fails)
+
+[Terminal 2] Inspect point cloud fields:
+  ros2 topic echo /d1/points_raw --once | grep "name:"
+
+  PASS: fields include x, y, z, intensity
+  FAIL: empty or no fields → sensor SDF misconfigured
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PHASE 2 — Lidar Enricher → points_enriched
+  Goal: confirm lidar_enricher adds ring + time and publishes /d1/points_enriched
+════════════════════════════════════════════════════════════════════════════════
+
+Keep simulation.launch.py running from Phase 1.
+
+[Terminal 2] Launch lidar enricher for d1 manually:
+  ros2 run drone_bringup lidar_enricher.py \
+    --ros-args \
+    -p input_topic:=/d1/points_raw \
+    -p output_topic:=/d1/points_enriched \
+    -p n_scan:=16 \
+    -p horizon_scan:=1800 \
+    -p scan_rate:=10.0
+
+[Terminal 3] Verify enriched topic:
+  ros2 topic hz /d1/points_enriched      # expect ~10 Hz
+
+  PASS: ~10 Hz
+  FAIL: 0 Hz → lidar_enricher crashed or input_topic wrong. Check terminal 2 logs.
+
+[Terminal 3] Verify ring + time fields are present and aligned:
+  ros2 topic echo /d1/points_enriched --once | grep -E "name:|offset:|datatype:"
+
+  PASS: you see
+    name: ring    offset: 16  datatype: 4  (UINT16)
+    name: time    offset: 20  datatype: 7  (FLOAT32)
+
+  FAIL: ring/time missing → lidar_enricher not running.
+        offset 18 for time → padding bug present (check lidar_enricher.py lines 96-107).
+
+Stop the manual enricher (Ctrl-C Terminal 2). The lio_sam_multi launch handles it.
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PHASE 3 — LIO-SAM: Odometry + Point Cloud
+  Goal: confirm LIO-SAM initialises and produces odometry at ~10 Hz
+════════════════════════════════════════════════════════════════════════════════
+
+Keep simulation.launch.py running.
+
+[Terminal 2] Launch SLAM pipeline (lidar_enricher + LIO-SAM for d1 and d2):
+  ros2 launch drone_bringup lio_sam_multi.launch.py
+
+Wait 20 s for LIO-SAM nodes to initialise (4 nodes per drone start sequentially).
+
+[Terminal 3] Check LIO-SAM node list:
+  ros2 node list | grep lio_sam
+
+  PASS: you see 8 nodes:
+    /d1/lio_sam/imageProjection
+    /d1/lio_sam/imuPreintegration
+    /d1/lio_sam/featureExtraction
+    /d1/lio_sam/mapOptimization
+    (same four for /d2)
+
+  FAIL: nodes missing → launch failed. Check terminal 2 for error messages.
+
+[Terminal 3] Check odometry output:
+  ros2 topic hz /d1/lio_sam/mapping/odometry    # expect ~10 Hz
+  ros2 topic hz /d1/lio_sam/mapping/cloud_registered  # expect ~1–10 Hz
+
+  PASS: both > 0 Hz
+  FAIL: 0 Hz even after 40 s → LIO-SAM not initialising.
+    Possible causes:
+      a) /d1/points_enriched not flowing → check Phase 2
+      b) IMU not publishing → check: ros2 topic hz /d1/imu/data
+      c) Config bug → run: ros2 param get /d1/lio_sam/imageProjection sensor
+         PASS: "velodyne"   FAIL: "ouster" → check lio_sam_d1.yaml
+
+[Terminal 3] Check TF tree (should have d1/map → d1/odom → d1/base_link):
+  ros2 run tf2_tools view_frames --ros-args -r __ns:=/d1
+  # or quick check:
+  ros2 run tf2_ros tf2_echo d1/odom d1/base_link
+
+  PASS: transform prints (position changes as drone moves)
+  FAIL: "Could not find transform" → TF frames misconfigured.
+    Check baselinkFrame / odometryFrame in lio_sam_d1.yaml.
+
+[Terminal 3] Sample odometry values:
+  ros2 topic echo /d1/lio_sam/mapping/odometry --once
+
+  PASS: position fields are non-zero (or near-zero before drone moves), no NaN
+  FAIL: all zeros / NaN → LIO-SAM receives data but cannot initialise pose.
+    Usually caused by extrinsicTrans sign error (check lio_sam_d1.yaml line 23:
+    must be [0.0, 0.0, -0.12], NOT [0.0, 0.0, 0.12]).
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PHASE 4 — OctoMap + Frontier Detection
+  Goal: confirm projected_map is produced and frontiers are detected
+════════════════════════════════════════════════════════════════════════════════
+
+Keep simulation.launch.py and lio_sam_multi.launch.py running.
+
+[Terminal 2] Launch octomap for d1:
+  ros2 launch octomap_pipeline octomap.launch.py drone_ns:=d1
+
+[Terminal 2b] Launch frontier detector for d1:
+  ros2 launch frontier_detector frontier.launch.py drone_ns:=d1
+
+Wait 10 s for OctoMap to accumulate voxels.
+
+[Terminal 3] Check projected_map:
+  ros2 topic hz /d1/projected_map     # expect ~0.5–2 Hz (slower than lidar)
+
+  PASS: > 0 Hz
+  FAIL: 0 Hz → octomap_server not receiving cloud_registered.
+    Check: ros2 topic hz /d1/lio_sam/mapping/cloud_registered
+
+[Terminal 3] Inspect map content:
+  ros2 topic echo /d1/projected_map --once | head -15
+
+  PASS: info.width and info.height > 0, data array not all -1 (unknown)
+  FAIL: all cells = -1 → drone has not moved or LIO-SAM not producing cloud.
+
+[Terminal 3] Check frontiers:
+  ros2 topic hz /d1/frontiers/list    # expect > 0 Hz once map has free cells
+  ros2 topic echo /d1/frontiers/list --once
+
+  PASS: FrontierList message with at least 1 frontier cluster
+  FAIL: 0 Hz → frontier_detector not subscribed to projected_map.
+    Check: ros2 topic list | grep /d1/projected_map
+    Check: ros2 node info /d1/frontier_detector_node | grep "Subscriptions"
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PHASE 5 — PX4 + Offboard Controller: Arm + Takeoff
+  Goal: both drones arm, enter OFFBOARD mode, hover at ~3 m
+════════════════════════════════════════════════════════════════════════════════
+
+Run cleanup first, then:
+
+[Terminal 1] Launch PX4 SITL + XRCE agents:
+  ros2 launch drone_bringup px4_multi.launch.py
+
+Wait 20 s for PX4 to boot (watch for "commander: Switched to Disarmed").
+
+[Terminal 2] Launch Gazebo + bridge:
+  ros2 launch drone_bringup simulation.launch.py
+
+Wait 15 s.
+
+[Terminal 3] Launch SLAM:
+  ros2 launch drone_bringup lio_sam_multi.launch.py
+
+Wait 20 s.
+
+[Terminal 4] Launch offboard controller:
+  ros2 launch px4_offboard px4_offboard.launch.py
+
+Wait 60 s total from PX4 boot (Phase 2 EKF2 params are injected at t≈50 s).
+
+[Terminal 5] Verify arm + hover:
+  ros2 topic echo /d1/fmu/out/vehicle_status_v1 --once
+    PASS: nav_state: 14  (OFFBOARD)  arming_state: 2  (ARMED)
+
+  ros2 topic echo /d1/fmu/out/vehicle_local_position --once
+    PASS: z ≈ -1.5  (NED, negative = above ground)
+          xy_valid: true    z_valid: true
+
+  ros2 topic echo /d2/fmu/out/vehicle_status_v1 --once
+    PASS: nav_state: 14    arming_state: 2
+
+  FAIL: nav_state ≠ 14 → offboard_controller not sending setpoints.
+    Check: ros2 topic hz /d1/fmu/in/offboard_control_mode  (expect ~10 Hz)
+    Check: ros2 topic hz /d1/fmu/in/trajectory_setpoint    (expect ~10 Hz)
+
+  FAIL: arming_state ≠ 2 → PX4 refused to arm.
+    Check battery failsafe: must have COM_LOW_BAT_ACT=0 in launch_px4_instance.sh
+    Check for EKF2 fix: xy_valid and z_valid must both be true.
+
+  FAIL: z_valid=false → EKF2 has no height source.
+    EKF2_HGT_REF=0 (barometer) or =3 (VIO) must be set.
+    EKF2 params are injected at t≈50 s — wait longer and retry.
+
+Run diagnose_pipeline.py for a full one-shot view of all stages:
+  python3 scripts/diagnose_pipeline.py --ns d1 --timeout 8
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PHASE 6 — Full-Stack Launch + Topic Verification
+  Goal: confirm all pipeline topics are present in one launch
+════════════════════════════════════════════════════════════════════════════════
+
+Run cleanup. Then launch everything at once:
+
+[Terminal 1]
+  ros2 launch drone_bringup full_stack.launch.py use_rviz:=false
+
+Wait 40 s for staged startup to complete (PX4 t=0, Gazebo t=5, SLAM t=15,
+offboard t=30, exploration t=33).
+
+[Terminal 2] Run automated topic checker:
+  python3 scripts/test_rviz_topics.py
+
+  PASS: "[PASS] All enabled RViz topics are present with correct types."
+  FAIL: prints missing topics → trace back through phases 1-5.
+
+[Terminal 2] Run full pipeline diagnostics:
+  python3 scripts/diagnose_pipeline.py --ns d1 --timeout 10
+  python3 scripts/diagnose_pipeline.py --ns d2 --timeout 10
+
+  PASS: all 9 stages show OK
+  FAIL: first MISS stage tells you exactly where the chain is broken.
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PHASE 7 — Map Return Verification
+  Goal: capture the final map and POIs as a PNG + text report
+════════════════════════════════════════════════════════════════════════════════
+
+Run full-stack from Phase 6. Keep it running.
+
+Let the drones explore for at least 2–3 minutes so the map accumulates coverage.
+
+[Terminal 2] Capture map snapshot:
+  python3 scripts/show_map_result.py --timeout 30 --output /tmp/maze_map_result.png
+
+  PASS output:
+    Drone D1 map:
+      Grid size    : NNN × NNN  (NNNN cells)
+      Resolution   : 20.0 cm/cell
+      Free         : NNNN cells  (NN.N %)
+      Occupied     : NNNN cells  (NN.N %)
+      Unknown      : NNNN cells  (NN.N %)
+      Explored area: N.NN m²
+    [OK] Map saved → /tmp/maze_map_result.png
+
+  PASS criteria:
+    - "Free" > 0% (maze cells mapped)
+    - "Occupied" > 0% (walls detected)
+    - "Unknown" < 90% (meaningful exploration happened)
+    - PNG file written without error
+
+  FAIL: "No map received" →
+    1. Confirm full stack is still running (do NOT kill it first)
+    2. Check: ros2 topic hz /d1/projected_map   (expect > 0)
+    3. Check: ros2 topic hz /d1/lio_sam/mapping/cloud_registered
+    4. Try: python3 scripts/show_map_result.py --timeout 60
+    5. If still 0 Hz on projected_map: trace back to Phase 3/4.
+
+[Terminal 2] Verify PNG content (open with any image viewer):
+  eog /tmp/maze_map_result.png          # GNOME
+  # or
+  xdg-open /tmp/maze_map_result.png
+
+  PASS: image shows maze layout in grayscale (white=free, black=walls, gray=unknown)
+        ArUco POI markers shown as red circles if any were detected.
+
+[Terminal 2] Check ArUco / POI detection (optional, requires markers in view):
+  ros2 topic echo /d1/aruco/detections --once
+
+  PASS: ArucoDetection message with tag_id, world_pose, confidence fields
+  SKIP: if no ArUco markers are placed in the maze
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PHASE 8 — Mission Complete Signal
+  Goal: mission_complete is published after all frontiers are exhausted
+════════════════════════════════════════════════════════════════════════════════
+
+With full stack running and drones actively exploring:
+
+[Terminal 2] Watch for mission complete:
+  ros2 topic echo /mission_complete
+
+Wait until all frontiers are exhausted (no_frontier_timeout = 30 s by default).
+When the coordinator sees no new frontiers for 30 s, it publishes True here
+AND sends cmd/land to both drones.
+
+  PASS: message prints: data: true
+        Both drones begin descending and disarm.
+
+  FAIL: never published →
+    Check: ros2 topic hz /d1/frontiers/list
+      If 0 Hz: frontier_detector not running → restart exploration_manager.
+    Check: ros2 node list | grep coordinator
+      If missing: drone_coordinator not started.
+    Check coordinator logs:
+      ros2 topic echo /d1/drone_state --once  (expect status: idle after landing)
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PHASE 9 — End-to-End Summary Checklist
+════════════════════════════════════════════════════════════════════════════════
+
+Run this table top-to-bottom during a full mission. All must pass.
+
+  ┌──────────────────────────────────────────────────┬────────────┐
+  │ Check                                            │ Result     │
+  ├──────────────────────────────────────────────────┼────────────┤
+  │ /d1/points_raw at ~10 Hz                         │ PASS/FAIL  │
+  │ /d1/imu/data at ~100 Hz                          │ PASS/FAIL  │
+  │ /d1/points_enriched ring.offset=16 time.offset=20│ PASS/FAIL  │
+  │ /d1/lio_sam/mapping/odometry at ~10 Hz           │ PASS/FAIL  │
+  │ /d1/lio_sam/mapping/cloud_registered > 0 Hz      │ PASS/FAIL  │
+  │ /d1/projected_map published (latched)            │ PASS/FAIL  │
+  │ /d1/frontiers/list has > 0 clusters              │ PASS/FAIL  │
+  │ /d1/fmu/out/vehicle_status_v1 nav_state=14       │ PASS/FAIL  │
+  │ /d1/fmu/out/vehicle_local_position z ≈ -1.5      │ PASS/FAIL  │
+  │ /d2/* same checks as d1                          │ PASS/FAIL  │
+  │ show_map_result.py → free% > 0, PNG written      │ PASS/FAIL  │
+  │ /mission_complete → data: true                   │ PASS/FAIL  │
+  │ Both drones land after mission_complete           │ PASS/FAIL  │
+  └──────────────────────────────────────────────────┴────────────┘
+
+
+════════════════════════════════════════════════════════════════════════════════
+  QUICK REFERENCE — Key Commands
+════════════════════════════════════════════════════════════════════════════════
+
+Topic rates (run in any terminal with workspace sourced):
+  ros2 topic hz /d1/points_raw
+  ros2 topic hz /d1/points_enriched
+  ros2 topic hz /d1/lio_sam/mapping/odometry
+  ros2 topic hz /d1/projected_map
+  ros2 topic hz /d1/frontiers/list
+
+One-shot diagnostic script (full chain, requires stack running):
+  python3 scripts/diagnose_pipeline.py --ns d1 --timeout 8
+
+Topic checker (all expected topics present):
+  python3 scripts/test_rviz_topics.py
+
+Map + POI capture:
+  python3 scripts/show_map_result.py --timeout 30 --output /tmp/maze_map_result.png
+
+Mock pipeline test (no Gazebo needed, validates lidar_enricher + YAML):
+  python3 scripts/test_pipeline_mock.py
+
+No-sim exploration logic test:
+  python3 scripts/test_exploration_cycle.py
+
+Soak test (60 s):
+  ROS_DOMAIN_ID=42 python3 scripts/test_soak.py --duration 60
+
+TF tree check:
+  ros2 run tf2_ros tf2_echo d1/odom d1/base_link
+
+Node list check:
+  ros2 node list | grep -E "(lio_sam|enricher|octomap|frontier|aruco|coordinator|offboard)"
+
+
+════════════════════════════════════════════════════════════════════════════════
+  KNOWN CONFIRMED RESULTS (as of 2026-03-03)
+════════════════════════════════════════════════════════════════════════════════
+
+  test_pipeline_mock.py         → 50/50 PASS
+  test_exploration_cycle.py     → 5/5 PASS
+  test_soak.py --duration 60    → 60 cycles, 0 errors PASS
+  Arm + takeoff (both drones)   → hover at 3 m PASS
+  Full-stack Level 3/4          → requires Gazebo run (not yet confirmed post-fix)
+
+════════════════════════════════════════════════════════════════════════════════

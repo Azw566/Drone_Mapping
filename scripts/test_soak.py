@@ -229,7 +229,14 @@ def main():
     node = SoakMonitorNode()
     executor = SingleThreadedExecutor()
     executor.add_node(node)
-    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+
+    def _spin():
+        try:
+            executor.spin()
+        except Exception:
+            pass
+
+    spin_thread = threading.Thread(target=_spin, daemon=True)
     spin_thread.start()
 
     procs = []

@@ -93,7 +93,10 @@ class ExplorationPlannerNode(Node):
         """Coordinator hands us a frontier centroid to explore."""
         self._goal = req.frontier_centroid
         self._status = _STATUS_EXPLORING
-        # Republish immediately so the offboard controller picks it up
+        # Publish state immediately so monitors see 'exploring' before _tick
+        # can transition back to 'idle' (which happens within the next 0.1 s).
+        self._publish_state()
+        # Republish goal immediately so the offboard controller picks it up
         self._pub_goal.publish(self._goal)
         self.get_logger().info(
             f'[{self._ns}] Assigned frontier: '
