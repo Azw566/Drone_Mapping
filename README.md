@@ -19,11 +19,8 @@ Gazebo sensors
   │                                                                                   │
   │                                                                         frontier_detector ──► /d{n}/frontiers/list
   │                                                                                                       │
-  │                                                                                         drone_coordinator ──► assign_frontier
-  │                                                                                                                       │
-  │                                                                                                         exploration_planner ──► /d{n}/goal_pose
-  │                                                                                                                                         │
-  │                                                                                                                            offboard_controller ──► PX4 setpoints
+│                                                                                         drone_coordinator ──► assign_frontier
+  │                                                                                                                       │ │                                                                                                         exploration_planner ──► /d{n}/goal_pose │                                                                                                                                         │ │                                                                                                                            offboard_controller ──► PX4 setpoints
   │
   └─ /d{n}/camera/image_raw ──► aruco_detector ──► /d{n}/aruco/detections ──► poi_manager
 
@@ -435,3 +432,4 @@ drone/
 │   ├── aruco_detector/             # ArUco marker detection
 │   └── exploration_manager/        # Multi-drone coordination and planning
 ```
+# Mapping_Multiple_Drone
