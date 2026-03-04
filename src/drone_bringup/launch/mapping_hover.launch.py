@@ -186,6 +186,8 @@ def generate_launch_description():
 
         # Restrict CycloneDDS to loopback to cut multicast jitter
         SetEnvironmentVariable('CYCLONEDDS_URI', _CYCLONE_URI),
+        # Force Gazebo transport to stay on localhost; keeps bridge + PX4 agents aligned.
+        SetEnvironmentVariable('GZ_IP', '127.0.0.1'),
 
         # t=0s  — Gazebo (internal timers: spawn d1@5s, d2@7s, bridge@8s)
         simulation,
