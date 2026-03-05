@@ -43,6 +43,7 @@ def generate_launch_description():
                 'output_markers':    marker_topic,
                 'output_frontiers':  frontier_topic,
                 'min_frontier_size': min_size,
+                'use_sim_time':      True,
             }],
         ),
     ])
