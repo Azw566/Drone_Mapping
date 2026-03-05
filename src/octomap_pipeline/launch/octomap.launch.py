@@ -41,6 +41,7 @@ def generate_launch_description():
             parameters=[default_params, {
                 'frame_id': frame_id,
                 'resolution': resolution,
+                'use_sim_time': True,
             }],
             remappings=[
                 # Input: LIO-SAM registered point cloud

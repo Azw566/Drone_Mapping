@@ -1,6 +1,7 @@
 import collections
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from nav_msgs.msg import OccupancyGrid
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
@@ -22,9 +23,18 @@ class FrontierDetector(Node):
         frontier_topic = self.get_parameter('output_frontiers').get_parameter_value().string_value
         self.min_frontier_size = self.get_parameter('min_frontier_size').get_parameter_value().integer_value
 
+        # octomap_server publishes projected_map with TRANSIENT_LOCAL (latch=true).
+        # Subscriber must match, otherwise DDS treats the connection as incompatible
+        # and delivers zero messages.
+        latched_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
+
         self.marker_pub   = self.create_publisher(MarkerArray, marker_topic, 10)
         self.frontier_pub = self.create_publisher(FrontierList, frontier_topic, 10)
-        self.map_sub      = self.create_subscription(OccupancyGrid, map_topic, self.map_cb, 10)
+        self.map_sub      = self.create_subscription(OccupancyGrid, map_topic, self.map_cb, latched_qos)
 
         rate = self.get_parameter('publish_rate_hz').get_parameter_value().double_value
         self.timer = self.create_timer(1.0 / rate, self.publish_frontiers)
