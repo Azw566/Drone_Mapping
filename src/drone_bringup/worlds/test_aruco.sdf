@@ -18,7 +18,7 @@
             <diffuse>1 1 1 1</diffuse>
             <pbr>
               <metal>
-                <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_0.png</albedo_map>
+                <albedo_map>file:///root/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_0.png</albedo_map>
               </metal>
             </pbr>
           </material>
@@ -37,7 +37,7 @@
             <diffuse>1 1 1 1</diffuse>
             <pbr>
               <metal>
-                <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_2.png</albedo_map>
+                <albedo_map>file:///root/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_2.png</albedo_map>
               </metal>
             </pbr>
           </material>
@@ -56,7 +56,7 @@
             <diffuse>1 1 1 1</diffuse>
             <pbr>
               <metal>
-                <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_3.png</albedo_map>
+                <albedo_map>file:///root/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_3.png</albedo_map>
               </metal>
             </pbr>
           </material>
@@ -75,7 +75,7 @@
             <diffuse>1 1 1 1</diffuse>
             <pbr>
               <metal>
-                <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_4.png</albedo_map>
+                <albedo_map>file:///root/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_4.png</albedo_map>
               </metal>
             </pbr>
           </material>
@@ -94,7 +94,7 @@
             <diffuse>1 1 1 1</diffuse>
             <pbr>
               <metal>
-                <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_1.png</albedo_map>
+                <albedo_map>file:///root/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_1.png</albedo_map>
               </metal>
             </pbr>
           </material>

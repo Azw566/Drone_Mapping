@@ -5,7 +5,7 @@
     <physics type="ode">
       <max_step_size>0.001</max_step_size>
       <real_time_factor>1.0</real_time_factor>
-      <real_time_update_rate>1000</real_time_update_rate>
+      <real_time_update_rate>250</real_time_update_rate>
     </physics>
 
     <plugin filename="gz-sim-air-pressure-system" name="gz::sim::systems::AirPressure"/>
@@ -511,7 +511,7 @@
         <diffuse>1 1 1 1</diffuse>
         <pbr>
           <metal>
-            <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_0.png</albedo_map>
+            <albedo_map>file:///root/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_0.png</albedo_map>
           </metal>
         </pbr>
       </material>
@@ -532,7 +532,7 @@
         <diffuse>1 1 1 1</diffuse>
         <pbr>
           <metal>
-            <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_1.png</albedo_map>
+            <albedo_map>file:///root/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_1.png</albedo_map>
           </metal>
         </pbr>
       </material>
@@ -553,7 +553,7 @@
         <diffuse>1 1 1 1</diffuse>
         <pbr>
           <metal>
-            <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_2.png</albedo_map>
+            <albedo_map>file:///root/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_2.png</albedo_map>
           </metal>
         </pbr>
       </material>
@@ -574,7 +574,7 @@
         <diffuse>1 1 1 1</diffuse>
         <pbr>
           <metal>
-            <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_3.png</albedo_map>
+            <albedo_map>file:///root/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_3.png</albedo_map>
           </metal>
         </pbr>
       </material>
@@ -595,7 +595,7 @@
         <diffuse>1 1 1 1</diffuse>
         <pbr>
           <metal>
-            <albedo_map>file:///home/telemaque/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_4.png</albedo_map>
+            <albedo_map>file:///root/ros_ws/drone/src/drone_bringup/models/aruco_marker/materials/textures/marker_4.png</albedo_map>
           </metal>
         </pbr>
       </material>

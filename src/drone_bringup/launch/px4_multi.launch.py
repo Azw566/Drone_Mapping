@@ -21,9 +21,9 @@ ROS2 topics published by PX4 (via uXRCE-DDS):
 
 Environment variables (can be overridden before launching):
   PX4_DIR      path to PX4-Autopilot source tree
-               default: /home/telemaque/px4_workspace/PX4-Autopilot
+               default: /root/px4_workspace/PX4-Autopilot
   XRCE_AGENT   path to MicroXRCEAgent binary
-               default: /home/telemaque/Micro-XRCE-DDS-Agent/build/MicroXRCEAgent
+               default: /root/Micro-XRCE-DDS-Agent/build/MicroXRCEAgent
 """
 
 import os
@@ -34,11 +34,11 @@ from launch.actions import ExecuteProcess, TimerAction
 # ── Paths ────────────────────────────────────────────────────────────────────
 PX4_DIR = os.path.expanduser(
     os.environ.get('PX4_DIR',
-                   '/home/telemaque/px4_workspace/PX4-Autopilot'))
+                   '/root/px4_workspace/PX4-Autopilot'))
 
 XRCE_AGENT = os.environ.get(
     'XRCE_AGENT',
-    '/home/telemaque/Micro-XRCE-DDS-Agent/build/MicroXRCEAgent')
+    '/root/Micro-XRCE-DDS-Agent/build/MicroXRCEAgent')
 
 
 def _script_path() -> str:

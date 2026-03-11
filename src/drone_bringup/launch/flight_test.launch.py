@@ -52,7 +52,7 @@ def generate_launch_description():
     rviz_config = os.path.join(pkg_dir, 'rviz', 'multi_drone.rviz')
 
     _px4_dir = os.environ.get('PX4_DIR',
-                              '/home/telemaque/px4_workspace/PX4-Autopilot')
+                              '/root/px4_workspace/PX4-Autopilot')
     _px4_models = os.path.join(_px4_dir, 'Tools', 'simulation', 'gz', 'models')
     gz_resource_path = (
         f"{model_path}:{_px4_models}:{os.environ.get('GZ_SIM_RESOURCE_PATH', '')}"
@@ -60,7 +60,7 @@ def generate_launch_description():
 
     XRCE_AGENT = os.environ.get(
         'XRCE_AGENT',
-        '/home/telemaque/Micro-XRCE-DDS-Agent/build/MicroXRCEAgent')
+        '/root/Micro-XRCE-DDS-Agent/build/MicroXRCEAgent')
     px4_script = os.path.join(
         get_package_prefix('drone_bringup'), 'lib', 'drone_bringup', 'launch_px4_instance.sh')
     heartbeat_script = os.path.join(

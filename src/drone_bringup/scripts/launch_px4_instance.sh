@@ -14,7 +14,7 @@
 #
 # Environment (can be overridden before calling this script)
 #   PX4_DIR   path to PX4-Autopilot source tree
-#             default: /home/telemaque/px4_workspace/PX4-Autopilot
+#             default: /root/px4_workspace/PX4-Autopilot
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ INSTANCE="${1:?Usage: $0 <instance_id> <model_name> <namespace>}"
 MODEL_NAME="${2:?}"
 NS="${3:?}"
 
-PX4_DIR="${PX4_DIR:-/home/telemaque/px4_workspace/PX4-Autopilot}"
+PX4_DIR="${PX4_DIR:-/root/px4_workspace/PX4-Autopilot}"
 BUILD_DIR="${PX4_DIR}/build/px4_sitl_default"
 PX4_BIN="${BUILD_DIR}/bin/px4"
 STARTUP="${BUILD_DIR}/etc/init.d-posix/rcS"
@@ -38,7 +38,8 @@ if [[ ! -f "${STARTUP}" ]]; then
 fi
 
 # ── Environment for this PX4 instance ───────────────────────────────────────
-export PX4_GZ_STANDALONE=1          # attach to running Gazebo — don't start one
+export PX4_GZ_STANDALONE=1
+export PX4_GZ_WORLD=maze            # must match world name in maze.sdf          # attach to running Gazebo — don't start one
 export PX4_GZ_MODEL_NAME="${MODEL_NAME}"   # Gazebo model to attach to
 export PX4_UXRCE_DDS_NS="${NS}"     # ROS2/DDS topic namespace  (d1 or d2)
 export PX4_SYS_AUTOSTART=4001       # x500 multicopter airframe
@@ -123,7 +124,7 @@ echo "[PX4-${NS}] instance=${INSTANCE} model=${MODEL_NAME} rootfs=${BUILD_DIR}"
         for _i in $(seq 1 24); do
             if timeout 5 bash -c "
                 source /opt/ros/humble/setup.bash 2>/dev/null
-                source /home/telemaque/ros_ws/drone/install/setup.bash 2>/dev/null
+                source /root/ros_ws/drone/install/setup.bash 2>/dev/null
                 ros2 topic echo --qos-reliability best_effort --once \
                     /${NS}/fmu/in/vehicle_visual_odometry > /dev/null 2>&1
             "; then

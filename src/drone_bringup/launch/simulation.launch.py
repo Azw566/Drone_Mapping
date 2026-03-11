@@ -42,7 +42,7 @@ def generate_launch_description():
     # PX4 models directory — required so the <include><uri>x500</uri></include>
     # inside x500_vision_lidar/model.sdf can be resolved at spawn time.
     _px4_dir = os.environ.get('PX4_DIR',
-                              '/home/telemaque/px4_workspace/PX4-Autopilot')
+                              '/root/px4_workspace/PX4-Autopilot')
     _px4_models = os.path.join(_px4_dir, 'Tools', 'simulation', 'gz', 'models')
 
     gz_resource_path = os.environ.get('GZ_SIM_RESOURCE_PATH', '')
