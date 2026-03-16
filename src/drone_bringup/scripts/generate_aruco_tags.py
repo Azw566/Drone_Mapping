@@ -20,8 +20,9 @@ USAGE:
   python3 generate_aruco_tags.py --output_dir ./tag_images --num_tags 5 --size 200
 
 OUTPUT:
-  Creates PNG files: aruco_0.png, aruco_1.png, ..., aruco_4.png
-  These can be used as Gazebo model textures via <pbr><metal><albedo_map>
+  Creates PNG files: marker_0.png, marker_1.png, ..., marker_4.png
+  These can be used directly as Gazebo model textures via
+  <pbr><metal><albedo_map>
 """
 
 import argparse
@@ -71,7 +72,10 @@ def generate_tags(output_dir: str, num_tags: int, tag_size_px: int, dictionary_n
         # generateImageMarker creates a binary image of the tag.
         # Args: dictionary, tag_id, output_size_px
         # Returns: grayscale numpy array (0=black, 255=white)
-        tag_image = aruco.generateImageMarker(aruco_dict, tag_id, tag_size_px)
+        if hasattr(aruco, 'generateImageMarker'):
+            tag_image = aruco.generateImageMarker(aruco_dict, tag_id, tag_size_px)
+        else:
+            tag_image = aruco.drawMarker(aruco_dict, tag_id, tag_size_px)
 
         # Add a white border around the tag.
         # ArUco detection REQUIRES a white border — without it,
@@ -83,9 +87,11 @@ def generate_tags(output_dir: str, num_tags: int, tag_size_px: int, dictionary_n
             cv2.BORDER_CONSTANT, value=255
         )
 
-        output_path = os.path.join(output_dir, f'aruco_{tag_id}.png')
-        cv2.imwrite(output_path, bordered)
-        print(f"Generated tag {tag_id} → {output_path} "
+        output_names = [f'marker_{tag_id}.png', f'aruco_{tag_id}.png']
+        for output_name in output_names:
+            output_path = os.path.join(output_dir, output_name)
+            cv2.imwrite(output_path, bordered)
+        print(f"Generated tag {tag_id} → {output_names[0]} "
               f"({bordered.shape[1]}×{bordered.shape[0]} px)")
 
     print(f"\nDone! Generated {num_tags} tags using dictionary '{dictionary_name}'")

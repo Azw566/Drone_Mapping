@@ -97,17 +97,18 @@ class LidarEnricher(Node):
             fields_out.append(PointField(name='ring', offset=offset,
                                          datatype=PointField.UINT16, count=1))
             offset += 2
-            # Pad to 4-byte boundary so the following FLOAT32 is aligned.
-            # Without this, LIO-SAM reads 'time' from a misaligned offset and
-            # discards every scan (all-NaN timestamps).
+        if not has_time:
+            # Gazebo already provides a uint16 'ring' field. Pad to the next
+            # 4-byte boundary before appending FLOAT32 'time', or PCL will read
+            # misaligned timestamps and feed garbage into LIO-SAM.
             if offset % 4 != 0:
                 offset += 4 - (offset % 4)
-        if not has_time:
             fields_out.append(PointField(name='time', offset=offset,
                                          datatype=PointField.FLOAT32, count=1))
 
         enriched_points = []
         vert_res = (self.max_vert_rad - self.min_vert_rad) / max(self.n_scan - 1, 1)
+        horiz_span = msg.width if msg.height > 1 else self.horizon_scan
 
         for idx, pt in enumerate(points_list):
             pt_list = list(pt)
@@ -120,12 +121,18 @@ class LidarEnricher(Node):
                 ring = max(0, min(self.n_scan - 1, ring))
                 pt_list.append(ring)
             if not has_time:
-                horiz_idx = idx % self.horizon_scan
-                time = horiz_idx / (self.horizon_scan * self.scan_rate)
+                horiz_idx = idx % horiz_span
+                time = horiz_idx / (horiz_span * self.scan_rate)
                 pt_list.append(time)
             enriched_points.append(tuple(pt_list))
 
         out_msg = pc2.create_cloud(msg.header, fields_out, enriched_points)
+        if msg.height > 1 and len(enriched_points) == msg.width * msg.height:
+            out_msg.height = msg.height
+            out_msg.width = msg.width
+            out_msg.row_step = out_msg.point_step * out_msg.width
+        out_msg.is_bigendian = msg.is_bigendian
+        out_msg.is_dense = msg.is_dense
         self.pub.publish(out_msg)
 
 

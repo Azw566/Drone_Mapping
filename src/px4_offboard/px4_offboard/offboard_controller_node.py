@@ -35,6 +35,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 
+from nav_msgs.msg import Odometry
 from px4_msgs.msg import (
     OffboardControlMode,
     TrajectorySetpoint,
@@ -63,6 +64,8 @@ HOVER_ALT_M      = 1.5    # metres above takeoff (NED z = -HOVER_ALT_M)
 GOAL_RADIUS_M    = 0.5    # consider goal reached when within this distance
 PRE_ARM_SECS     = 2.0    # seconds of publishing before arming
 TAKEOFF_VEL_MS   = 1.5    # vertical climb speed during TAKING_OFF (m/s, NED -z)
+MAX_EXPLORING_STEP_M = 0.08  # cap each horizontal setpoint update to ~0.8 m/s @ 10 Hz
+FACE_GOAL_YAW = False
 
 
 class OffboardControllerNode(Node):
@@ -71,13 +74,25 @@ class OffboardControllerNode(Node):
 
         self.declare_parameter('drone_ns', 'd1')
         self.declare_parameter('hover_alt', HOVER_ALT_M)
+        self.declare_parameter('max_exploring_step_m', MAX_EXPLORING_STEP_M)
+        self.declare_parameter('face_goal_yaw', FACE_GOAL_YAW)
 
         ns   = self.get_parameter('drone_ns').get_parameter_value().string_value
         self._ns = ns
         self._hover_alt = self.get_parameter('hover_alt').get_parameter_value().double_value
+        self._max_exploring_step_m = (
+            self.get_parameter('max_exploring_step_m').get_parameter_value().double_value)
+        self._face_goal_yaw = (
+            self.get_parameter('face_goal_yaw').get_parameter_value().bool_value)
 
         # PX4 QoS
         px4_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10,
+        )
+        lio_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
             history=HistoryPolicy.KEEP_LAST,
@@ -100,6 +115,9 @@ class OffboardControllerNode(Node):
             VehicleLocalPosition, f'/{ns}/fmu/out/vehicle_local_position',
             self._pos_cb, px4_qos)
         self.create_subscription(
+            Odometry, f'/{ns}/lio_sam/mapping/odometry',
+            self._lio_cb, lio_qos)
+        self.create_subscription(
             Point, f'/{ns}/goal_pose', self._goal_cb, 10)
         self.create_subscription(
             Empty, f'/{ns}/cmd/land', self._land_cb, 10)
@@ -110,15 +128,19 @@ class OffboardControllerNode(Node):
         self._arm_state  = 1   # 1 = DISARMED
         self._pos_ned    = [0.0, 0.0, 0.0]   # current NED position from PX4
         self._home_ned   = None               # NED position at first position fix
+        self._lio_pos_enu = None              # current ENU position from LIO-SAM
         self._goal_enu   = None               # latest goal in ENU map frame
-        self._goal_ned   = None               # goal converted to NED
         self._pre_arm_start = None
         self._arm_last_attempt = None         # last time arm command was sent
         self._px4_us     = 0                  # latest PX4 timestamp (µs) from VehicleLocalPosition
+        self._auto_start_enabled = True       # only auto-arm once per process
         # ── Main control timer (10 Hz) ───────────────────────────────────────
         self.create_timer(0.1, self._control_loop)
 
-        self.get_logger().info(f'[{ns}] OffboardController ready (hover={self._hover_alt} m)')
+        self.get_logger().info(
+            f'[{ns}] OffboardController ready '
+            f'(hover={self._hover_alt} m, max_step={self._max_exploring_step_m:.2f} m, '
+            f'face_goal_yaw={self._face_goal_yaw})')
 
     # ── Callbacks ─────────────────────────────────────────────────────────
     def _status_cb(self, msg: VehicleStatus):
@@ -133,6 +155,10 @@ class OffboardControllerNode(Node):
             self.get_logger().info(
                 f'[{self._ns}] Home NED: {self._home_ned}')
 
+    def _lio_cb(self, msg: Odometry):
+        p = msg.pose.pose.position
+        self._lio_pos_enu = [p.x, p.y, p.z]
+
     def _land_cb(self, msg: Empty):
         if self._state != _IDLE:
             self.get_logger().info(f'[{self._ns}] Land command → LANDING')
@@ -141,22 +167,20 @@ class OffboardControllerNode(Node):
     def _goal_cb(self, msg: Point):
         """Accept a new goal in ENU map frame."""
         self._goal_enu = [msg.x, msg.y, msg.z]
-        # Convert ENU → NED
-        self._goal_ned = [msg.y, msg.x, -self._hover_alt]
         if self._state == _HOVER:
             self._state = _EXPLORING
             self.get_logger().info(
-                f'[{self._ns}] New goal ENU({msg.x:.1f},{msg.y:.1f}) '
-                f'→ NED({self._goal_ned[0]:.1f},{self._goal_ned[1]:.1f})')
+                f'[{self._ns}] → EXPLORING goal ENU({msg.x:.1f},{msg.y:.1f})')
 
     # ── Control loop ──────────────────────────────────────────────────────
     def _control_loop(self):
         now = self.get_clock().now()
 
         if self._state == _IDLE:
-            if self._home_ned is not None:
+            if self._auto_start_enabled and self._home_ned is not None:
                 self._state = _PRE_ARM
                 self._pre_arm_start = now
+                self._auto_start_enabled = False
                 self.get_logger().info(f'[{self._ns}] → PRE_ARM')
 
         elif self._state == _PRE_ARM:
@@ -219,9 +243,8 @@ class OffboardControllerNode(Node):
         elif self._state == _EXPLORING:
             self._publish_ocm()
             self._publish_goal_setpoint()
-            if self._goal_ned is not None and self._at_goal():
+            if self._goal_enu is not None and self._at_goal():
                 self._state = _HOVER
-                self._goal_ned = None
                 self._goal_enu = None
                 self.get_logger().info(f'[{self._ns}] Goal reached → HOVER')
 
@@ -229,11 +252,14 @@ class OffboardControllerNode(Node):
             self._publish_ocm(velocity_mode=True)
             self._publish_landing_setpoint()
             if self._pos_ned[2] > -0.3:   # within 30 cm of ground (NED z → 0)
-                self._send_disarm_command()
-                self._state    = _IDLE
-                self._goal_ned = None
-                self._goal_enu = None
-                self.get_logger().info(f'[{self._ns}] Landed → IDLE')
+                if self._arm_state == 1:   # DISARMED
+                    self._state    = _IDLE
+                    self._goal_enu = None
+                    self.get_logger().info(f'[{self._ns}] Landed → IDLE')
+                elif (self._arm_last_attempt is None or
+                      (now - self._arm_last_attempt).nanoseconds * 1e-9 >= 1.0):
+                    self._arm_last_attempt = now
+                    self._send_disarm_command()
 
     # ── Timestamp helper ──────────────────────────────────────────────────
     def _now_us(self) -> int:
@@ -295,12 +321,17 @@ class OffboardControllerNode(Node):
         self._pub_sp.publish(msg)
 
     def _publish_goal_setpoint(self):
+        goal_ned = self._goal_setpoint_ned()
+        if goal_ned is None:
+            self._publish_hover_setpoint()
+            return
         msg = TrajectorySetpoint()
         msg.timestamp = self._now_us()
-        msg.position = [float(self._goal_ned[0]),
-                        float(self._goal_ned[1]),
-                        float(self._goal_ned[2])]
-        msg.yaw = self._yaw_to_goal()
+        msg.position = [float(goal_ned[0]),
+                        float(goal_ned[1]),
+                        float(goal_ned[2])]
+        msg.yaw = self._yaw_to_goal() if self._face_goal_yaw else _NAN
+        msg.yawspeed = 0.5 if self._face_goal_yaw else 0.0
         self._pub_sp.publish(msg)
 
     def _publish_landing_setpoint(self):
@@ -341,18 +372,43 @@ class OffboardControllerNode(Node):
         return abs(self._pos_ned[2] - (-self._hover_alt)) < 0.3
 
     def _at_goal(self) -> bool:
-        if self._goal_ned is None:
+        if self._goal_enu is None or self._lio_pos_enu is None:
             return False
-        dx = self._pos_ned[0] - self._goal_ned[0]
-        dy = self._pos_ned[1] - self._goal_ned[1]
+        dx = self._lio_pos_enu[0] - self._goal_enu[0]
+        dy = self._lio_pos_enu[1] - self._goal_enu[1]
         return math.sqrt(dx*dx + dy*dy) < GOAL_RADIUS_M
 
     def _yaw_to_goal(self) -> float:
-        if self._goal_ned is None:
-            return 0.0
-        dx = self._goal_ned[0] - self._pos_ned[0]
-        dy = self._goal_ned[1] - self._pos_ned[1]
+        goal_delta_ned = self._goal_delta_ned()
+        if goal_delta_ned is None:
+            return _NAN
+        dx = goal_delta_ned[0]
+        dy = goal_delta_ned[1]
         return math.atan2(dy, dx)
+
+    def _goal_delta_ned(self):
+        if self._goal_enu is None or self._lio_pos_enu is None:
+            return None
+        dx_enu = self._goal_enu[0] - self._lio_pos_enu[0]
+        dy_enu = self._goal_enu[1] - self._lio_pos_enu[1]
+        return [dy_enu, dx_enu]
+
+    def _goal_setpoint_ned(self):
+        goal_delta_ned = self._goal_delta_ned()
+        if goal_delta_ned is None:
+            return None
+        dist = math.hypot(goal_delta_ned[0], goal_delta_ned[1])
+        if dist > self._max_exploring_step_m and dist > 1e-6:
+            scale = self._max_exploring_step_m / dist
+            goal_delta_ned = [
+                goal_delta_ned[0] * scale,
+                goal_delta_ned[1] * scale,
+            ]
+        return [
+            self._pos_ned[0] + goal_delta_ned[0],
+            self._pos_ned[1] + goal_delta_ned[1],
+            -self._hover_alt,
+        ]
 
 
 

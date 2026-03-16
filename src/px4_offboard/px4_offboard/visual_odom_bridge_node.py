@@ -76,6 +76,7 @@ class VisualOdomBridgeNode(Node):
         )
 
         self._px4_us = 0   # latest PX4 clock value (µs), updated from vehicle_local_position
+        self._msg_count = 0
 
         self.pub = self.create_publisher(VehicleOdometry, vio_topic, px4_qos)
         self.sub = self.create_subscription(
@@ -103,6 +104,12 @@ class VisualOdomBridgeNode(Node):
         return self.get_clock().now().nanoseconds // 1000
 
     def _cb(self, msg: Odometry):
+        self._msg_count += 1
+        if self._msg_count == 1 or self._msg_count % 50 == 0:
+            self.get_logger().info(
+                f'[{self.get_parameter("drone_ns").get_parameter_value().string_value}] '
+                f'VIO cb #{self._msg_count}, px4_us={self._px4_us}')
+
         # ── Position ENU → NED ───────────────────────────────────────────────
         ex = msg.pose.pose.position.x
         ey = msg.pose.pose.position.y

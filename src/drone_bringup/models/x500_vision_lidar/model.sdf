@@ -91,8 +91,8 @@
         <lidar>
           <scan>
             <horizontal>
-              <!-- 1800 points per ring, full 360° -->
-              <samples>1800</samples>
+              <!-- 900 points per ring, full 360° (2° steps, halved for perf) -->
+              <samples>900</samples>
               <resolution>1</resolution>
               <min_angle>-3.14159</min_angle>
               <max_angle>3.14159</max_angle>
@@ -127,12 +127,13 @@
     <!-- ════════════════════════════════════════════════════
          RGB CAMERA
          ════════════════════════════════════════════════════
-         Front-facing, pitched 15° down for ArUco tag detection.
-         640×480 @ 15 FPS is sufficient for ArUco detection.
+         Front-facing, pitched 25° down for ArUco tag detection.
+         A narrower 50° lens plus 800×600 @ 15 FPS gives wall tags enough
+         pixel footprint to decode from the 3 m exploration altitude.
     -->
     <link name="camera_link">
-      <!-- 15cm forward, 5cm below center, pitched 15° down (0.26 rad) -->
-      <pose relative_to="base_link">0.15 0 -0.05 0 0.26 0</pose>
+      <!-- 15cm forward, 5cm below center, pitched 25° down (0.44 rad) -->
+      <pose relative_to="base_link">0.15 0 -0.05 0 0.44 0</pose>
       <inertial>
         <mass>0.05</mass>
         <inertia>
@@ -161,10 +162,10 @@
         <visualize>false</visualize>
 
         <camera>
-          <horizontal_fov>1.396</horizontal_fov>
+          <horizontal_fov>0.872665</horizontal_fov>
           <image>
-            <width>640</width>
-            <height>480</height>
+            <width>800</width>
+            <height>600</height>
             <format>R8G8B8</format>
           </image>
           <clip>
@@ -174,7 +175,7 @@
           <noise>
             <type>gaussian</type>
             <mean>0.0</mean>
-            <stddev>0.005</stddev>
+            <stddev>0.0</stddev>
           </noise>
         </camera>
       </sensor>

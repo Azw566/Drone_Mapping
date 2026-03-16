@@ -251,6 +251,7 @@ def generate_launch_description():
         goal_y_arg,
 
         # Restrict DDS to loopback — eliminates multicast jitter
+        SetEnvironmentVariable('ROS_LOCALHOST_ONLY', '1'),
         SetEnvironmentVariable('CYCLONEDDS_URI',
             '<CycloneDDS><Domain><General>'
             '<Interfaces><NetworkInterface name="lo"/></Interfaces>'

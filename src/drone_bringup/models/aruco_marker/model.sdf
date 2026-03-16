@@ -7,7 +7,7 @@
       <visual name="visual">
         <geometry>
           <plane>
-            <size>0.2 0.2</size> </plane>
+            <size>0.6 0.6</size> </plane>
         </geometry>
         <material>
           <diffuse>1 1 1 1</diffuse>
@@ -25,7 +25,7 @@
       <visual name="visual">
         <geometry>
           <plane>
-            <size>0.2 0.2</size>
+            <size>0.6 0.6</size>
           </plane>
         </geometry>
         <material>
@@ -44,7 +44,7 @@
       <visual name="visual">
         <geometry>
           <plane>
-            <size>0.2 0.2</size>
+            <size>0.6 0.6</size>
           </plane>
         </geometry>
         <material>
@@ -63,7 +63,7 @@
       <visual name="visual">
         <geometry>
           <plane>
-            <size>0.2 0.2</size>
+            <size>0.6 0.6</size>
           </plane>
         </geometry>
         <material>
@@ -82,7 +82,7 @@
       <visual name="visual">
         <geometry>
           <plane>
-            <size>0.2 0.2</size>
+            <size>0.6 0.6</size>
           </plane>
         </geometry>
         <material>

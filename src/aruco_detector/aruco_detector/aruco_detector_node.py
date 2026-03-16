@@ -16,6 +16,7 @@ The 'detected_by' and topic structure are ready for multi-drone POI merging
 but the RegisterPOI service call is intentionally left for future integration.
 """
 
+import math
 import numpy as np
 import cv2
 import rclpy
@@ -36,6 +37,8 @@ class ArucoDetectorNode(Node):
     def __init__(self):
         super().__init__('aruco_detector')
 
+        self._last_logged = {}
+
         # ── Parameters ──────────────────────────────────────────────────────
         self.declare_parameter('image_topic',       '/d1/camera/image_raw')
         self.declare_parameter('camera_info_topic', '/d1/camera/camera_info')
@@ -48,6 +51,8 @@ class ArucoDetectorNode(Node):
         self.declare_parameter('camera_optical_frame', 'd1/camera_optical_frame')
         self.declare_parameter('marker_size',       0.2)   # physical side length [m]
         self.declare_parameter('aruco_dict_id',     0)     # 0 = DICT_4X4_50
+        self.declare_parameter('min_confidence',    0.02)
+        self.declare_parameter('max_detection_distance_m', 10.0)
 
         image_topic      = self.get_parameter('image_topic').value
         info_topic       = self.get_parameter('camera_info_topic').value
@@ -57,15 +62,17 @@ class ArucoDetectorNode(Node):
         self.cam_frame   = self.get_parameter('camera_optical_frame').value
         self.marker_size = self.get_parameter('marker_size').value
         dict_id          = self.get_parameter('aruco_dict_id').value
+        self._min_confidence = self.get_parameter('min_confidence').value
+        self._max_detection_distance_m = (
+            self.get_parameter('max_detection_distance_m').value)
 
         # ── ArUco detector (API ≥4.7 / <4.7 compat) ─────────────────────
         aruco_dict = cv2.aruco.getPredefinedDictionary(dict_id)
+        det_params = self._create_detector_params()
         try:
-            det_params         = cv2.aruco.DetectorParameters()
             self._detector     = cv2.aruco.ArucoDetector(aruco_dict, det_params)
             self._new_aruco    = True
         except AttributeError:
-            det_params         = cv2.aruco.DetectorParameters_create()
             self._aruco_dict   = aruco_dict
             self._det_params   = det_params
             self._new_aruco    = False
@@ -95,9 +102,6 @@ class ArucoDetectorNode(Node):
         self.create_subscription(Image,      image_topic, self._image_cb, 5)
         self._pub = self.create_publisher(ArucoDetection, output_topic, 10)
 
-        # Per-tag log throttle: avoid spamming at camera frame rate
-        self._last_logged: dict[int, float] = {}
-
         self.get_logger().info(
             f'ArUco detector ready | drone={self.drone_id} '
             f'| image={image_topic} | output={output_topic}'
@@ -122,6 +126,7 @@ class ArucoDetectorNode(Node):
             return
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.equalizeHist(gray)
 
         # Detect markers
         if self._new_aruco:
@@ -137,6 +142,9 @@ class ArucoDetectorNode(Node):
 
         for i, marker_id in enumerate(ids.flatten()):
             img_pts = corners[i].reshape(4, 2).astype(np.float32)
+            confidence = self._confidence(corners[i])
+            if confidence < self._min_confidence:
+                continue
 
             # PnP: pose of marker in camera_optical_frame
             ret, rvec, tvec = cv2.solvePnP(
@@ -145,6 +153,9 @@ class ArucoDetectorNode(Node):
                 flags=cv2.SOLVEPNP_IPPE_SQUARE,
             )
             if not ret:
+                continue
+            if (math.sqrt(float(np.dot(tvec.flatten(), tvec.flatten()))) >
+                    self._max_detection_distance_m):
                 continue
 
             # Build PoseStamped in camera_optical_frame
@@ -179,7 +190,7 @@ class ArucoDetectorNode(Node):
             det = ArucoDetection()
             det.tag_id      = int(marker_id)
             det.world_pose  = pose_world
-            det.confidence  = self._confidence(corners[i])
+            det.confidence  = confidence
             det.detected_by = self.drone_id
             self._pub.publish(det)
 
@@ -195,6 +206,25 @@ class ArucoDetectorNode(Node):
                 )
 
     # ── Helpers ───────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _create_detector_params():
+        try:
+            det_params = cv2.aruco.DetectorParameters()
+        except AttributeError:
+            det_params = cv2.aruco.DetectorParameters_create()
+
+        det_params.cornerRefinementMethod = getattr(
+            cv2.aruco, 'CORNER_REFINE_SUBPIX', 1)
+        det_params.cornerRefinementWinSize = 5
+        det_params.minMarkerPerimeterRate = 0.015
+        det_params.maxMarkerPerimeterRate = 4.0
+        det_params.adaptiveThreshWinSizeMin = 3
+        det_params.adaptiveThreshWinSizeMax = 35
+        det_params.adaptiveThreshWinSizeStep = 4
+        if hasattr(det_params, 'useAruco3Detection'):
+            det_params.useAruco3Detection = True
+        return det_params
 
     @staticmethod
     def _rot_to_quat(R):

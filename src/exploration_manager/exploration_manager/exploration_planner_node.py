@@ -24,13 +24,14 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Point, PoseStamped
+from geometry_msgs.msg import Point
 from drone_interfaces.msg import FrontierList, DroneState
 from drone_interfaces.srv import AssignFrontier
-from px4_msgs.msg import BatteryStatus
+from px4_msgs.msg import BatteryStatus, VehicleLocalPosition
 
 _STATUS_IDLE      = 'idle'
 _STATUS_EXPLORING = 'exploring'
+_STATUS_TAKING_OFF = 'taking_off'
 
 
 class ExplorationPlannerNode(Node):
@@ -39,10 +40,23 @@ class ExplorationPlannerNode(Node):
 
         self.declare_parameter('drone_ns', 'd1')
         self.declare_parameter('goal_radius', 0.8)
+        self.declare_parameter('hover_alt', 3.0)
+        self.declare_parameter('hover_ready_tolerance_m', 0.5)
+        self.declare_parameter('tick_period_s', 0.5)
+        self.declare_parameter('state_publish_period_s', 1.0)
+        self.declare_parameter('goal_republish_period_s', 2.0)
 
         ns   = self.get_parameter('drone_ns').get_parameter_value().string_value
         self._ns          = ns
         self._goal_radius = self.get_parameter('goal_radius').get_parameter_value().double_value
+        self._hover_alt = self.get_parameter('hover_alt').get_parameter_value().double_value
+        self._hover_ready_tolerance_m = (
+            self.get_parameter('hover_ready_tolerance_m').get_parameter_value().double_value)
+        self._tick_period_s = self.get_parameter('tick_period_s').get_parameter_value().double_value
+        self._state_publish_period_s = (
+            self.get_parameter('state_publish_period_s').get_parameter_value().double_value)
+        self._goal_republish_period_s = (
+            self.get_parameter('goal_republish_period_s').get_parameter_value().double_value)
 
         # ── Publishers ───────────────────────────────────────────────────────
         self._pub_goal  = self.create_publisher(Point, f'/{ns}/goal_pose', 10)
@@ -62,6 +76,9 @@ class ExplorationPlannerNode(Node):
         self.create_subscription(
             BatteryStatus, f'/{ns}/fmu/out/battery_status',
             self._battery_cb, _best_effort_qos)
+        self.create_subscription(
+            VehicleLocalPosition, f'/{ns}/fmu/out/vehicle_local_position',
+            self._local_pos_cb, _best_effort_qos)
 
         # ── Service server ───────────────────────────────────────────────────
         self._srv = self.create_service(
@@ -70,11 +87,16 @@ class ExplorationPlannerNode(Node):
         # ── State ────────────────────────────────────────────────────────────
         self._pos_enu  = [0.0, 0.0, 0.0]   # current ENU position
         self._goal     = None               # current goal (geometry_msgs/Point)
-        self._status   = _STATUS_IDLE
+        self._status   = _STATUS_TAKING_OFF
         self._battery  = 100.0
+        self._last_goal_publish_s = None
+        self._px4_z_ned = 0.0
+        self._px4_xy_valid = False
+        self._px4_z_valid = False
+        self._ready_logged = False
 
-        self.create_timer(0.5, self._publish_state)
-        self.create_timer(0.1, self._tick)
+        self.create_timer(self._state_publish_period_s, self._publish_state)
+        self.create_timer(self._tick_period_s, self._tick)
 
         self.get_logger().info(f'[{ns}] ExplorationPlanner ready')
 
@@ -88,16 +110,25 @@ class ExplorationPlannerNode(Node):
             return  # -1 = unknown; keep last value
         self._battery = max(0.0, min(100.0, msg.remaining * 100.0))
 
+    def _local_pos_cb(self, msg: VehicleLocalPosition):
+        self._px4_z_ned = msg.z
+        self._px4_xy_valid = msg.xy_valid
+        self._px4_z_valid = msg.z_valid
+
     def _assign_cb(self, req: AssignFrontier.Request,
                    res: AssignFrontier.Response) -> AssignFrontier.Response:
         """Coordinator hands us a frontier centroid to explore."""
+        if not self._flight_ready():
+            res.accepted = False
+            res.reason = 'vehicle not ready for exploration'
+            return res
         self._goal = req.frontier_centroid
         self._status = _STATUS_EXPLORING
-        # Publish state immediately so monitors see 'exploring' before _tick
-        # can transition back to 'idle' (which happens within the next 0.1 s).
+        # Publish state immediately so monitors see 'exploring' before the next
+        # planner tick can transition back to 'idle'.
         self._publish_state()
-        # Republish goal immediately so the offboard controller picks it up
-        self._pub_goal.publish(self._goal)
+        # Publish immediately so the offboard controller picks the assignment up.
+        self._publish_goal()
         self.get_logger().info(
             f'[{self._ns}] Assigned frontier: '
             f'({self._goal.x:.1f}, {self._goal.y:.1f})')
@@ -107,14 +138,28 @@ class ExplorationPlannerNode(Node):
 
     # ── Tick ───────────────────────────────────────────────────────────────
     def _tick(self):
+        if self._status != _STATUS_EXPLORING:
+            ready = self._flight_ready()
+            next_status = _STATUS_IDLE if ready else _STATUS_TAKING_OFF
+            if next_status != self._status:
+                self._status = next_status
+            if ready and not self._ready_logged:
+                self.get_logger().info(f'[{self._ns}] Ready for frontier assignments')
+                self._ready_logged = True
+
         if self._status == _STATUS_EXPLORING and self._goal is not None:
-            # Re-publish goal at each tick so late-joining controller gets it
-            self._pub_goal.publish(self._goal)
             if self._at_goal():
                 self.get_logger().info(
                     f'[{self._ns}] Reached frontier — idle')
                 self._goal   = None
                 self._status = _STATUS_IDLE
+                self._last_goal_publish_s = None
+                return
+
+            now_s = self.get_clock().now().nanoseconds * 1e-9
+            if (self._last_goal_publish_s is None or
+                    (now_s - self._last_goal_publish_s) >= self._goal_republish_period_s):
+                self._publish_goal()
 
     def _at_goal(self) -> bool:
         if self._goal is None:
@@ -142,6 +187,18 @@ class ExplorationPlannerNode(Node):
             msg.current_goal.z = float(self._goal.z)
 
         self._pub_state.publish(msg)
+
+    def _publish_goal(self):
+        if self._goal is None:
+            return
+        self._pub_goal.publish(self._goal)
+        self._last_goal_publish_s = self.get_clock().now().nanoseconds * 1e-9
+
+    def _flight_ready(self) -> bool:
+        if not (self._px4_xy_valid and self._px4_z_valid):
+            return False
+        target_z_ned = -self._hover_alt
+        return abs(self._px4_z_ned - target_z_ned) <= self._hover_ready_tolerance_m
 
 
 def main():

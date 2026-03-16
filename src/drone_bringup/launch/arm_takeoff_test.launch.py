@@ -88,6 +88,7 @@ def generate_launch_description():
 
         # Restrict CycloneDDS to loopback interface only (system uses CycloneDDS RMW).
         # Eliminates multicast traffic that adds latency jitter to DDS communication.
+        SetEnvironmentVariable('ROS_LOCALHOST_ONLY', '1'),
         SetEnvironmentVariable('CYCLONEDDS_URI',
             '<CycloneDDS><Domain><General>'
             '<Interfaces><NetworkInterface name="lo"/></Interfaces>'

@@ -23,6 +23,7 @@ Pixel colour key:
 
 import argparse
 import math
+import os
 import signal
 import sys
 import time
@@ -241,7 +242,12 @@ class MapSaverNode(Node):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
         # ── Step 8: save ──────────────────────────────────────────────────
-        cv2.imwrite(self._output_path, canvas)
+        out_dir = os.path.dirname(self._output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        if not cv2.imwrite(self._output_path, canvas):
+            self.get_logger().error(f'Failed to write map image to {self._output_path}')
+            return False
         self.get_logger().info(
             f'Saved {canvas_w}x{canvas_h}px map → {self._output_path} '
             f'({n_tags} tags, {len(maps)} drone map(s))')

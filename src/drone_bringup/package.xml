@@ -19,6 +19,7 @@
   <exec_depend>rviz2</exec_depend>                 <!-- Visualization -->
   <exec_depend>drone_interfaces</exec_depend>      <!-- Our custom messages -->
   <exec_depend>rclpy</exec_depend>                 <!-- Python nodes -->
+  <exec_depend>px4_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>           <!-- PointCloud2, Imu -->
   <exec_depend>std_msgs</exec_depend>
 

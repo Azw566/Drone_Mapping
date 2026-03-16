@@ -1,8 +1,10 @@
 import collections
+import math
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import Odometry
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
 from std_msgs.msg import Header
@@ -16,12 +18,20 @@ class FrontierDetector(Node):
         self.declare_parameter('output_markers', '/frontiers/markers')
         self.declare_parameter('output_frontiers', '/frontiers/list')
         self.declare_parameter('min_frontier_size', 5)
-        self.declare_parameter('publish_rate_hz', 2.0)
+        self.declare_parameter('publish_rate_hz', 1.0)
+        self.declare_parameter('odom_topic', '')
+        self.declare_parameter('max_frontier_distance_m', 12.0)
+        self.declare_parameter('max_frontier_clusters', 64)
 
         map_topic      = self.get_parameter('map_topic').get_parameter_value().string_value
         marker_topic   = self.get_parameter('output_markers').get_parameter_value().string_value
         frontier_topic = self.get_parameter('output_frontiers').get_parameter_value().string_value
+        odom_topic     = self.get_parameter('odom_topic').get_parameter_value().string_value
         self.min_frontier_size = self.get_parameter('min_frontier_size').get_parameter_value().integer_value
+        self.max_frontier_distance_m = (
+            self.get_parameter('max_frontier_distance_m').get_parameter_value().double_value)
+        self.max_frontier_clusters = (
+            self.get_parameter('max_frontier_clusters').get_parameter_value().integer_value)
 
         # octomap_server publishes projected_map with TRANSIENT_LOCAL (latch=true).
         # Subscriber must match, otherwise DDS treats the connection as incompatible
@@ -35,15 +45,22 @@ class FrontierDetector(Node):
         self.marker_pub   = self.create_publisher(MarkerArray, marker_topic, 10)
         self.frontier_pub = self.create_publisher(FrontierList, frontier_topic, 10)
         self.map_sub      = self.create_subscription(OccupancyGrid, map_topic, self.map_cb, latched_qos)
+        if odom_topic:
+            self.create_subscription(Odometry, odom_topic, self.odom_cb, 10)
 
         rate = self.get_parameter('publish_rate_hz').get_parameter_value().double_value
         self.timer = self.create_timer(1.0 / rate, self.publish_frontiers)
 
         self.latest_grid = None
+        self._pos_enu = None
         self._prev_cluster_count = -1
 
     def map_cb(self, msg: OccupancyGrid):
         self.latest_grid = msg
+
+    def odom_cb(self, msg: Odometry):
+        p = msg.pose.pose.position
+        self._pos_enu = (p.x, p.y)
 
     def publish_frontiers(self):
         if self.latest_grid is None:
@@ -60,9 +77,23 @@ class FrontierDetector(Node):
         def idx(x, y):
             return y * width + x
 
+        scan_min_x = 0
+        scan_max_x = width
+        scan_min_y = 0
+        scan_max_y = height
+        if self._pos_enu is not None and self.max_frontier_distance_m > 0.0:
+            px, py = self._pos_enu
+            radius_cells = int(math.ceil(self.max_frontier_distance_m / max(res, 1e-6)))
+            cx = int((px - origin.position.x) / res)
+            cy = int((py - origin.position.y) / res)
+            scan_min_x = max(0, cx - radius_cells)
+            scan_max_x = min(width, cx + radius_cells + 1)
+            scan_min_y = max(0, cy - radius_cells)
+            scan_max_y = min(height, cy + radius_cells + 1)
+
         is_frontier = {}
-        for y in range(height):
-            for x in range(width):
+        for y in range(scan_min_y, scan_max_y):
+            for x in range(scan_min_x, scan_max_x):
                 if data[idx(x, y)] != 0:
                     continue
                 for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
@@ -72,10 +103,14 @@ class FrontierDetector(Node):
                             is_frontier[(x, y)] = True
                             break
 
+        stamp = self.get_clock().now().to_msg()
+        frame_id = grid.header.frame_id
+
         if not is_frontier:
             if self._prev_cluster_count > 0:
                 self.get_logger().info('Frontiers: none detected — area fully covered or map too sparse')
                 self._prev_cluster_count = 0
+            self._publish_empty_frontiers(frame_id, stamp)
             return
 
         # ── Step 2: BFS cluster frontier cells into connected components ──
@@ -100,6 +135,10 @@ class FrontierDetector(Node):
                 clusters.append(cluster)
 
         if not clusters:
+            if self._prev_cluster_count > 0:
+                self.get_logger().info('Frontiers: none detected — area fully covered or map too sparse')
+                self._prev_cluster_count = 0
+            self._publish_empty_frontiers(frame_id, stamp)
             return
 
         # ── Step 3: compute cluster centroids in world frame ──────────────
@@ -109,8 +148,22 @@ class FrontierDetector(Node):
             wz = origin.position.z
             return wx, wy, wz
 
-        stamp    = self.get_clock().now().to_msg()
-        frame_id = grid.header.frame_id
+        if self.max_frontier_clusters > 0 and len(clusters) > self.max_frontier_clusters:
+            if self._pos_enu is not None:
+                px, py = self._pos_enu
+
+                def cluster_score(cluster):
+                    avg_x = sum(c[0] for c in cluster) / len(cluster)
+                    avg_y = sum(c[1] for c in cluster) / len(cluster)
+                    wx, wy, _ = cell_to_world(avg_x, avg_y)
+                    dist = max(1.0, math.hypot(wx - px, wy - py))
+                    return len(cluster) / dist
+            else:
+                def cluster_score(cluster):
+                    return len(cluster)
+
+            clusters.sort(key=cluster_score, reverse=True)
+            clusters = clusters[:self.max_frontier_clusters]
 
         # ── Step 4: publish FrontierList ──────────────────────────────────
         fl = FrontierList()
@@ -133,6 +186,9 @@ class FrontierDetector(Node):
             self._prev_cluster_count = n
 
         # ── Step 5: publish MarkerArray (all cells coloured by cluster) ───
+        if self.marker_pub.get_subscription_count() == 0:
+            return
+
         markers = MarkerArray()
 
         # Delete old markers first
@@ -173,6 +229,24 @@ class FrontierDetector(Node):
                 m.points.append(Point(x=wx, y=wy, z=wz))
             markers.markers.append(m)
 
+        self.marker_pub.publish(markers)
+
+    def _publish_empty_frontiers(self, frame_id: str, stamp):
+        fl = FrontierList()
+        fl.header = Header(stamp=stamp, frame_id=frame_id)
+        self.frontier_pub.publish(fl)
+
+        if self.marker_pub.get_subscription_count() == 0:
+            return
+
+        markers = MarkerArray()
+        del_m = Marker()
+        del_m.header.frame_id = frame_id
+        del_m.header.stamp = stamp
+        del_m.ns = 'frontiers'
+        del_m.id = 0
+        del_m.action = Marker.DELETEALL
+        markers.markers.append(del_m)
         self.marker_pub.publish(markers)
 
 

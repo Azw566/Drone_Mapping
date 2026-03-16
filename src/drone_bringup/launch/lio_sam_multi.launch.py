@@ -115,7 +115,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('n_scan',        default_value='16'),
-        DeclareLaunchArgument('horizon_scan',  default_value='1800'),
+        DeclareLaunchArgument('horizon_scan',  default_value='900'),
         DeclareLaunchArgument('scan_rate',     default_value='10.0'),
 
         # ── Drone 1 ───────────────────────────────────────────────────────

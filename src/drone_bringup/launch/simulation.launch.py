@@ -165,8 +165,12 @@ def generate_launch_description():
         # Wait for Gazebo to initialize before spawning
         TimerAction(period=5.0, actions=[drone1_spawn]),
         TimerAction(period=7.0, actions=[drone2_spawn]),
-        # Wait for models to spawn before starting bridge
-        TimerAction(period=8.0, actions=[bridge]),
+        # Delay the bridge until Gazebo has finished bringing up the late
+        # sensor/odometry publishers. Starting at 8 s races the camera, lidar,
+        # and odometry topics: the bridge sees the topic names in config but
+        # misses the underlying GZ subscriptions, which leaves LIO-SAM with no
+        # points_raw input and PX4 with no VIO path.
+        TimerAction(period=10.0, actions=[bridge]),
         TimerAction(period=8.0, actions=[rsp_d1, rsp_d2]),
         rviz,
     ])

@@ -26,6 +26,8 @@ PX4_DIR="${PX4_DIR:-/home/telemaque/px4_workspace/PX4-Autopilot}"
 BUILD_DIR="${PX4_DIR}/build/px4_sitl_default"
 PX4_BIN="${BUILD_DIR}/bin/px4"
 STARTUP="${BUILD_DIR}/etc/init.d-posix/rcS"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WAIT_FOR_VIO="${SCRIPT_DIR}/wait_for_vio.py"
 
 # ── Pre-flight checks ────────────────────────────────────────────────────────
 if [[ ! -x "${PX4_BIN}" ]]; then
@@ -36,14 +38,40 @@ if [[ ! -f "${STARTUP}" ]]; then
     echo "[PX4-${NS}] ERROR: Startup script not found: ${STARTUP}" >&2
     exit 1
 fi
+if [[ ! -x "${WAIT_FOR_VIO}" ]]; then
+    echo "[PX4-${NS}] ERROR: wait_for_vio.py not found or not executable: ${WAIT_FOR_VIO}" >&2
+    exit 1
+fi
 
 # ── Environment for this PX4 instance ───────────────────────────────────────
 export PX4_GZ_STANDALONE=1          # attach to running Gazebo — don't start one
 export PX4_GZ_MODEL_NAME="${MODEL_NAME}"   # Gazebo model to attach to
 export PX4_UXRCE_DDS_NS="${NS}"     # ROS2/DDS topic namespace  (d1 or d2)
+export PX4_UXRCE_DDS_PORT="${PX4_UXRCE_DDS_PORT:-$((8888 + INSTANCE))}"
 export PX4_SYS_AUTOSTART=4001       # x500 multicopter airframe
-# Note: UXRCE_DDS_PRT is a PX4 *parameter* (not env var). Both instances default
-# to port 8888 and are distinguished by their UXRCE_DDS_KEY (auto-set per instance).
+# Apply critical PX4 parameters before rcS starts commander / uXRCE-DDS.
+# This is the only point where reboot_required params affect the current boot,
+# and it also prevents transient preflight/failsafe states during startup.
+export PX4_PARAM_UXRCE_DDS_PRT="${PX4_PARAM_UXRCE_DDS_PRT:-${PX4_UXRCE_DDS_PORT}}"
+export PX4_PARAM_UXRCE_DDS_PTCFG="${PX4_PARAM_UXRCE_DDS_PTCFG:-1}"
+# All ROS→PX4 publishers in this repo stamp messages from PX4's own clock, so
+# agent-side timestamp synchronization is redundant and prone to false resets
+# under heavy multi-drone DDS load.
+export PX4_PARAM_UXRCE_DDS_SYNCT="${PX4_PARAM_UXRCE_DDS_SYNCT:-0}"
+export PX4_PARAM_UXRCE_DDS_TX_TO="${PX4_PARAM_UXRCE_DDS_TX_TO:-10}"
+export PX4_PARAM_UXRCE_DDS_RX_TO="${PX4_PARAM_UXRCE_DDS_RX_TO:-10}"
+export PX4_PARAM_CBRK_SUPPLY_CHK="${PX4_PARAM_CBRK_SUPPLY_CHK:-894281}"
+export PX4_PARAM_COM_LOW_BAT_ACT="${PX4_PARAM_COM_LOW_BAT_ACT:-0}"
+export PX4_PARAM_SIM_BAT_ENABLE="${PX4_PARAM_SIM_BAT_ENABLE:-0}"
+export PX4_PARAM_MPC_XY_VEL_MAX="${PX4_PARAM_MPC_XY_VEL_MAX:-0.8}"
+export PX4_PARAM_MPC_XY_CRUISE="${PX4_PARAM_MPC_XY_CRUISE:-0.8}"
+export PX4_PARAM_MPC_ACC_HOR="${PX4_PARAM_MPC_ACC_HOR:-0.8}"
+export PX4_PARAM_MPC_ACC_HOR_MAX="${PX4_PARAM_MPC_ACC_HOR_MAX:-1.0}"
+export PX4_PARAM_MPC_JERK_AUTO="${PX4_PARAM_MPC_JERK_AUTO:-1.5}"
+# PX4 ULog writes add avoidable disk I/O and scheduler jitter in headless
+# multi-drone SITL. Override this env var to re-enable logging when needed.
+# SDLOG_MODE=-1 disables the logger entirely.
+export PX4_PARAM_SDLOG_MODE="${PX4_PARAM_SDLOG_MODE:--1}"
 
 # Clean stale SITL rootfs so stale EEPROM params from a previous run cannot
 # override our injected params (e.g. NAV_DLL_ACT != 0 from a prior session).
@@ -55,7 +83,7 @@ fi
 
 cd "${PX4_DIR}"
 
-echo "[PX4-${NS}] instance=${INSTANCE} model=${MODEL_NAME} rootfs=${BUILD_DIR}"
+echo "[PX4-${NS}] instance=${INSTANCE} model=${MODEL_NAME} rootfs=${BUILD_DIR} xrce_port=${PX4_UXRCE_DDS_PORT}"
 
 # ── Inject custom parameters via stdin pipe ──────────────────────────────────
 # The co-process below feeds PX4's interactive shell.
@@ -67,7 +95,6 @@ echo "[PX4-${NS}] instance=${INSTANCE} model=${MODEL_NAME} rootfs=${BUILD_DIR}"
     # Disable all arming checks that don't apply to headless SITL
     echo "param set COM_ARM_WO_GPS 1"        # allow arming without GPS fix
     echo "param set COM_RC_IN_MODE 4"        # no RC required
-    echo "param set CBRK_SUPPLY_CHK 894281"  # disable power supply check (no power module in SITL)
     echo "param set NAV_DLL_ACT 0"           # GCS connection not required for arming
     echo "param set COM_DL_LOSS_T 10"        # tolerate 10 s GCS loss before failsafe in flight
     echo "param set CBRK_FLIGHTTERM 121212"  # disable flight termination circuit breaker
@@ -75,8 +102,7 @@ echo "[PX4-${NS}] instance=${INSTANCE} model=${MODEL_NAME} rootfs=${BUILD_DIR}"
     echo "param set CBRK_USB_CHK 197848"     # disable USB connected check
     echo "param set COM_CPU_MAX -1"          # disable CPU load check
     echo "param set COM_OF_LOSS_T 10"        # tolerate 10 s OFFBOARD loss before failsafe
-                                             # (XRCE-DDS timesync can take ~5 s to reconverge)
-    echo "param set UXRCE_DDS_SYNCT 1000"   # increase DDS time-sync tolerance (ms) for high-load SITL
+                                             # (XRCE-DDS timesync can take a few seconds to reconverge)
 
     # Magnetometer: tell PX4 this vehicle has no magnetometer hardware.
     # In SITL the simulated mag cross-check fails when EKF2 propagates IMU-only
@@ -90,12 +116,6 @@ echo "[PX4-${NS}] instance=${INSTANCE} model=${MODEL_NAME} rootfs=${BUILD_DIR}"
     # x500_base = 2.0 kg; we add lidar (0.83 kg) + camera (0.05 kg) = 2.88 kg total.
     # Required MPC_THR_HOVER ≈ 0.60 × sqrt(2.88/2.0) ≈ 0.72
     echo "param set MPC_THR_HOVER 0.72"      # hover throttle for 2.88 kg variant
-
-    # Battery failsafe — SITL battery simulation drains quickly and triggers failsafe
-    # before the drone has a chance to take off.  Suppress it for SITL testing.
-    echo "param set COM_LOW_BAT_ACT 0"       # 0=warning only (no land/RTL on low battery)
-    echo "param set BAT_CRIT_THR 0.05"       # critical threshold 5% (default 7%)
-    echo "param set BAT_EMERGEN_THR 0.01"    # emergency threshold 1% (default 5%)
 
     # EKF2: initialise from GPS only. VIO fusion (EKF2_EV_CTRL=15) is enabled
     # in Phase 2 below, after LIO-SAM has had time to produce stable odometry.
@@ -121,12 +141,10 @@ echo "[PX4-${NS}] instance=${INSTANCE} model=${MODEL_NAME} rootfs=${BUILD_DIR}"
         echo "[PX4-${NS}] Waiting for VIO data on /${NS}/fmu/in/vehicle_visual_odometry ..." >&2
         VIO_DETECTED=0
         for _i in $(seq 1 24); do
-            if timeout 5 bash -c "
-                source /opt/ros/humble/setup.bash 2>/dev/null
-                source /home/telemaque/ros_ws/drone/install/setup.bash 2>/dev/null
-                ros2 topic echo --qos-reliability best_effort --once \
-                    /${NS}/fmu/in/vehicle_visual_odometry > /dev/null 2>&1
-            "; then
+            if "${WAIT_FOR_VIO}" \
+                "/${NS}/fmu/in/vehicle_visual_odometry" \
+                --count 3 \
+                --timeout 5.0 > /dev/null 2>&1; then
                 VIO_DETECTED=1
                 break
             fi

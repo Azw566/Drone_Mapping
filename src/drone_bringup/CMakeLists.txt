@@ -23,7 +23,9 @@ install(PROGRAMS
   scripts/lidar_enricher.py
   scripts/launch_px4_instance.sh
   scripts/save_arena_map.py
+  scripts/auto_save_arena_map.py
   scripts/gcs_heartbeat.py
+  scripts/wait_for_vio.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

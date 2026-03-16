@@ -185,6 +185,7 @@ def generate_launch_description():
             description='Hover altitude in metres (AGL)'),
 
         # Restrict CycloneDDS to loopback to cut multicast jitter
+        SetEnvironmentVariable('ROS_LOCALHOST_ONLY', '1'),
         SetEnvironmentVariable('CYCLONEDDS_URI', _CYCLONE_URI),
         # Force Gazebo transport to stay on localhost; keeps bridge + PX4 agents aligned.
         SetEnvironmentVariable('GZ_IP', '127.0.0.1'),

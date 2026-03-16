@@ -5,7 +5,7 @@
   ros__parameters:
     use_sim_time: true
     N_SCAN: 16
-    Horizon_SCAN: 1800
+    Horizon_SCAN: 900
     downsampleRate: 1
     sensor: "velodyne"
     lidarMinRange: 0.3

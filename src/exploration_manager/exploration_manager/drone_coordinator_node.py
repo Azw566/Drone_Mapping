@@ -41,6 +41,9 @@ class DroneCoordinatorNode(Node):
         self.declare_parameter('safety_radius', 3.0)
         self.declare_parameter('low_battery_threshold', 20.0)
         self.declare_parameter('no_frontier_timeout', 30.0)
+        self.declare_parameter('max_assignment_distance', 15.0)
+        self.declare_parameter('min_assignment_distance', 1.5)
+        self.declare_parameter('idle_completion_dwell_s', 5.0)
 
         namespaces = (self.get_parameter('drone_namespaces')
                       .get_parameter_value().string_array_value)
@@ -50,6 +53,12 @@ class DroneCoordinatorNode(Node):
                                    .get_parameter_value().double_value)
         self._no_frontier_timeout = (self.get_parameter('no_frontier_timeout')
                                      .get_parameter_value().double_value)
+        self._max_assignment_distance = (self.get_parameter('max_assignment_distance')
+                                         .get_parameter_value().double_value)
+        self._min_assignment_distance = (self.get_parameter('min_assignment_distance')
+                                         .get_parameter_value().double_value)
+        self._idle_completion_dwell_s = (self.get_parameter('idle_completion_dwell_s')
+                                         .get_parameter_value().double_value)
         self._namespaces = list(namespaces)
 
         # Per-drone state
@@ -59,6 +68,8 @@ class DroneCoordinatorNode(Node):
         self._land_pubs:          dict[str, object] = {}
         self._last_frontier_time: dict[str, float]  = {}
         self._mission_complete = False
+        self._exploration_started = False
+        self._no_assignable_since = None
 
         cbg = ReentrantCallbackGroup()
 
@@ -120,6 +131,9 @@ class DroneCoordinatorNode(Node):
         all_reported = len(self._states) == len(self._namespaces)
         all_idle = all_reported and all(
             s.status == _STATUS_IDLE for s in self._states.values())
+        all_frontiers_reported = len(self._frontiers) == len(self._namespaces)
+        all_frontiers_empty = all_frontiers_reported and all(
+            len(self._frontiers[ns].centroids) == 0 for ns in self._namespaces)
         # A drone counts as "no frontiers" if:
         #   (a) it has sent at least one frontier message but the last one was
         #       more than no_frontier_timeout seconds ago, OR
@@ -130,7 +144,19 @@ class DroneCoordinatorNode(Node):
         no_frontiers = all(
             (now_s - self._last_frontier_time[ns]) > self._no_frontier_timeout
             for ns in self._namespaces)
-        if all_idle and no_frontiers:
+        no_assignable_frontiers = all_idle and all_reported and all(
+            self._pick_best_frontier(ns, self._states[ns], [], now_s) is None
+            for ns in self._namespaces)
+        if no_assignable_frontiers and self._exploration_started:
+            if self._no_assignable_since is None:
+                self._no_assignable_since = now_s
+        else:
+            self._no_assignable_since = None
+        idle_completion_ready = (
+            self._exploration_started and
+            self._no_assignable_since is not None and
+            (now_s - self._no_assignable_since) >= self._idle_completion_dwell_s)
+        if all_idle and (all_frontiers_empty or no_frontiers or idle_completion_ready):
             self._mission_complete = True
             self.get_logger().info('[coordinator] Mission complete — all frontiers exhausted')
             self._pub_mission_complete.publish(Bool(data=True))
@@ -153,7 +179,7 @@ class DroneCoordinatorNode(Node):
             if state.battery_percent < self._low_bat_threshold:
                 continue
 
-            best = self._pick_best_frontier(ns, state, claimed)
+            best = self._pick_best_frontier(ns, state, claimed, now_s)
             if best is None:
                 continue
 
@@ -174,7 +200,8 @@ class DroneCoordinatorNode(Node):
     def _pick_best_frontier(self,
                             ns: str,
                             state: DroneState,
-                            claimed: list[Point]) -> Point | None:
+                            claimed: list[Point],
+                            now_s: float) -> Point | None:
         """Score all known frontiers and return the best unclaimed one."""
         drone_x = state.current_pose.pose.position.x
         drone_y = state.current_pose.pose.position.y
@@ -183,15 +210,22 @@ class DroneCoordinatorNode(Node):
         best_centroid = None
 
         for src_ns, fl in self._frontiers.items():
+            if (now_s - self._last_frontier_time.get(src_ns, 0.0)) > self._no_frontier_timeout:
+                continue
             for centroid, size in zip(fl.centroids, fl.sizes):
                 # Skip if another drone is already heading here
                 if any(self._dist(centroid, c) < self._safety_radius
                        for c in claimed):
                     continue
 
-                d = max(1.0, math.sqrt(
+                d = math.sqrt(
                     (centroid.x - drone_x)**2 +
-                    (centroid.y - drone_y)**2))
+                    (centroid.y - drone_y)**2)
+                if self._min_assignment_distance > 0.0 and d < self._min_assignment_distance:
+                    continue
+                d = max(1.0, d)
+                if self._max_assignment_distance > 0.0 and d > self._max_assignment_distance:
+                    continue
                 score = size / d
 
                 if score > best_score:
@@ -208,6 +242,7 @@ class DroneCoordinatorNode(Node):
         try:
             res = future.result()
             if res.accepted:
+                self._exploration_started = True
                 self.get_logger().info(
                     f'[coordinator] {ns} accepted frontier '
                     f'({goal.x:.1f}, {goal.y:.1f})')
