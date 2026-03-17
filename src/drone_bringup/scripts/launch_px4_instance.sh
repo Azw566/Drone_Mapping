@@ -60,6 +60,15 @@ export PX4_PARAM_UXRCE_DDS_PTCFG="${PX4_PARAM_UXRCE_DDS_PTCFG:-1}"
 export PX4_PARAM_UXRCE_DDS_SYNCT="${PX4_PARAM_UXRCE_DDS_SYNCT:-0}"
 export PX4_PARAM_UXRCE_DDS_TX_TO="${PX4_PARAM_UXRCE_DDS_TX_TO:-10}"
 export PX4_PARAM_UXRCE_DDS_RX_TO="${PX4_PARAM_UXRCE_DDS_RX_TO:-10}"
+export PX4_PARAM_COM_ARM_WO_GPS="${PX4_PARAM_COM_ARM_WO_GPS:-1}"
+export PX4_PARAM_COM_RC_IN_MODE="${PX4_PARAM_COM_RC_IN_MODE:-4}"
+export PX4_PARAM_COM_DL_LOSS_T="${PX4_PARAM_COM_DL_LOSS_T:-10}"
+export PX4_PARAM_NAV_DLL_ACT="${PX4_PARAM_NAV_DLL_ACT:-0}"
+export PX4_PARAM_COM_DISARM_PRFLT="${PX4_PARAM_COM_DISARM_PRFLT:--1}"
+export PX4_PARAM_COM_ARM_BAT_MIN="${PX4_PARAM_COM_ARM_BAT_MIN:--1}"
+export PX4_PARAM_BAT_LOW_THR="${PX4_PARAM_BAT_LOW_THR:-0.0}"
+export PX4_PARAM_BAT_CRIT_THR="${PX4_PARAM_BAT_CRIT_THR:-0.0}"
+export PX4_PARAM_BAT_EMERGEN_THR="${PX4_PARAM_BAT_EMERGEN_THR:-0.0}"
 export PX4_PARAM_CBRK_SUPPLY_CHK="${PX4_PARAM_CBRK_SUPPLY_CHK:-894281}"
 export PX4_PARAM_COM_LOW_BAT_ACT="${PX4_PARAM_COM_LOW_BAT_ACT:-0}"
 export PX4_PARAM_SIM_BAT_ENABLE="${PX4_PARAM_SIM_BAT_ENABLE:-0}"
@@ -68,6 +77,21 @@ export PX4_PARAM_MPC_XY_CRUISE="${PX4_PARAM_MPC_XY_CRUISE:-0.8}"
 export PX4_PARAM_MPC_ACC_HOR="${PX4_PARAM_MPC_ACC_HOR:-0.8}"
 export PX4_PARAM_MPC_ACC_HOR_MAX="${PX4_PARAM_MPC_ACC_HOR_MAX:-1.0}"
 export PX4_PARAM_MPC_JERK_AUTO="${PX4_PARAM_MPC_JERK_AUTO:-1.5}"
+# In the indoor maze we fly on visual odometry, not GNSS. Letting EKF2 fuse
+# both GPS and EV on the ground can trip pre-arm innovation checks and keep the
+# vehicle permanently "local position invalid" before takeoff.
+if [[ "${PX4_ENABLE_VIO:-1}" != "0" ]]; then
+    export PX4_PARAM_EKF2_GPS_CTRL="${PX4_PARAM_EKF2_GPS_CTRL:-0}"
+    export PX4_PARAM_EKF2_GPS_CHECK="${PX4_PARAM_EKF2_GPS_CHECK:-0}"
+    # Match PX4's vision airframe defaults up front. These are the parameters
+    # EKF2 expects for a pure external-vision setup, and two of them
+    # (HGT_REF, EV_DELAY) are reboot-required so late `param set` calls do not
+    # reliably affect the current boot.
+    export PX4_PARAM_EKF2_EV_CTRL="${PX4_PARAM_EKF2_EV_CTRL:-15}"
+    export PX4_PARAM_EKF2_HGT_REF="${PX4_PARAM_EKF2_HGT_REF:-3}"
+    export PX4_PARAM_EKF2_EV_DELAY="${PX4_PARAM_EKF2_EV_DELAY:-5}"
+    export PX4_PARAM_ATT_EXT_HDG_M="${PX4_PARAM_ATT_EXT_HDG_M:-1}"
+fi
 # PX4 ULog writes add avoidable disk I/O and scheduler jitter in headless
 # multi-drone SITL. Override this env var to re-enable logging when needed.
 # SDLOG_MODE=-1 disables the logger entirely.
@@ -104,39 +128,26 @@ echo "[PX4-${NS}] instance=${INSTANCE} model=${MODEL_NAME} rootfs=${BUILD_DIR} x
     echo "param set COM_OF_LOSS_T 10"        # tolerate 10 s OFFBOARD loss before failsafe
                                              # (XRCE-DDS timesync can take a few seconds to reconverge)
 
-    # Magnetometer: tell PX4 this vehicle has no magnetometer hardware.
-    # In SITL the simulated mag cross-check fails when EKF2 propagates IMU-only
-    # during XRCE-DDS timesync gaps, cascading into an attitude-failure failsafe.
-    # SYS_HAS_MAG 0 disables all compass checks (preflight and in-flight).
-    # Yaw is then initialised from GPS velocity, which is stable in SITL.
-    echo "param set SYS_HAS_MAG 0"          # no magnetometer — GPS-velocity yaw only
-    echo "param set COM_ARM_MAG_ANG -1"     # disable pre-arm magnetometer heading check
+    # Leave the simulated magnetometer enabled by default. PX4 otherwise has no
+    # yaw source until EV yaw fusion starts, and in this stack that can prevent
+    # local position from ever becoming valid on the ground.
+    if [[ "${PX4_DISABLE_MAG:-0}" != "0" ]]; then
+        echo "param set SYS_HAS_MAG 0"
+        echo "param set COM_ARM_MAG_ANG -1"
+    fi
 
     # Adjust hover throttle for our heavier drone.
     # x500_base = 2.0 kg; we add lidar (0.83 kg) + camera (0.05 kg) = 2.88 kg total.
     # Required MPC_THR_HOVER ≈ 0.60 × sqrt(2.88/2.0) ≈ 0.72
     echo "param set MPC_THR_HOVER 0.72"      # hover throttle for 2.88 kg variant
 
-    # EKF2: initialise from GPS only. VIO fusion (EKF2_EV_CTRL=15) is enabled
-    # in Phase 2 below, after LIO-SAM has had time to produce stable odometry.
-
     echo "param save"                        # persist params to SITL EEPROM
 
     echo "[PX4-${NS}] custom parameters applied." >&2
 
-    # ── Phase 2: enable VIO fusion once visual_odom_bridge is publishing ────
-    # Skipped when PX4_ENABLE_VIO=0 (e.g. flight_test — GPS only, no LIO-SAM).
-    # Enabling EKF2_EV_CTRL=15 before VIO data flows causes EKF2 to diverge
-    # and triggers immediate attitude-failure failsafes — confirmed by test.
-    #
-    # Instead of a blind sleep, we poll the VIO input topic until a message
-    # arrives, then wait 3 s for EKF2 to warm up on a few messages.
-    # Falls back after 120 s in case something goes wrong (operator can see
-    # the warning and diagnose).
-    #
-    # EKF2_HGT_REF=0 keeps GPS as the primary height source so the drone
-    # retains a valid height estimate if LIO-SAM lags behind.
-    # EKF2_EV_DELAY=200 accounts for LIO-SAM processing latency (~100–200 ms).
+    # ── Phase 2: VIO observability only ──────────────────────────────────────
+    # With the EV parameters applied pre-boot above, this stage is now just a
+    # sanity check that the ROS side is actually publishing VIO data.
     if [[ "${PX4_ENABLE_VIO:-1}" != "0" ]]; then
         echo "[PX4-${NS}] Waiting for VIO data on /${NS}/fmu/in/vehicle_visual_odometry ..." >&2
         VIO_DETECTED=0
@@ -153,18 +164,10 @@ echo "[PX4-${NS}] instance=${INSTANCE} model=${MODEL_NAME} rootfs=${BUILD_DIR} x
         done
 
         if [[ ${VIO_DETECTED} -eq 1 ]]; then
-            echo "[PX4-${NS}] VIO data confirmed — waiting 3 s before enabling EKF2 fusion ..." >&2
+            echo "[PX4-${NS}] VIO data confirmed (EKF2 vision params were already applied pre-boot)." >&2
         else
-            echo "[PX4-${NS}] WARNING: VIO not detected after 120 s, enabling anyway." >&2
+            echo "[PX4-${NS}] WARNING: VIO not detected after 120 s." >&2
         fi
-        sleep 3
-
-        echo "param set EKF2_EV_CTRL 15"        # fuse VIO: horiz pos + vert pos + vel + yaw
-        echo "param set EKF2_HGT_REF 0"         # keep GPS as primary height reference
-        echo "param set EKF2_EV_DELAY 200"      # LIO-SAM processing latency (~100–200 ms)
-        echo "param save"
-
-        echo "[PX4-${NS}] VIO fusion enabled (EKF2_EV_CTRL=15)." >&2
     else
         echo "[PX4-${NS}] VIO fusion skipped (PX4_ENABLE_VIO=0, GPS-only mode)." >&2
     fi

@@ -53,6 +53,12 @@ def generate_launch_description():
     drone_spawn_positions = LaunchConfiguration('drone_spawn_positions')
     poi_reference_tag_positions = LaunchConfiguration('poi_reference_tag_positions')
     max_tag_offset_refine_delta_m = LaunchConfiguration('max_tag_offset_refine_delta_m')
+    enable_interest_points = LaunchConfiguration('enable_interest_points')
+    interest_points = LaunchConfiguration('interest_points')
+    interest_points_preempt_frontiers = LaunchConfiguration('interest_points_preempt_frontiers')
+    interest_point_cooldown_s = LaunchConfiguration('interest_point_cooldown_s')
+    require_interest_points_for_completion = LaunchConfiguration(
+        'require_interest_points_for_completion')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -107,6 +113,26 @@ def generate_launch_description():
             'max_tag_offset_refine_delta_m',
             default_value='1.5',
             description='Reject ArUco-derived map-offset corrections larger than this distance'),
+        DeclareLaunchArgument(
+            'enable_interest_points',
+            default_value='false',
+            description='Assign fixed scan waypoints after mapping or alongside frontiers'),
+        DeclareLaunchArgument(
+            'interest_points',
+            default_value='',
+            description='Semicolon-separated label:x:y:z scan points in world coords; coordinator shifts them into each drone map frame'),
+        DeclareLaunchArgument(
+            'interest_points_preempt_frontiers',
+            default_value='false',
+            description='Prioritize fixed interest-point scans before frontier work'),
+        DeclareLaunchArgument(
+            'interest_point_cooldown_s',
+            default_value='10.0',
+            description='Minimum delay before retrying the same fixed interest point'),
+        DeclareLaunchArgument(
+            'require_interest_points_for_completion',
+            default_value='false',
+            description='Require every fixed interest point to be visited before mission complete'),
         # ── Per-drone planners ────────────────────────────────────────────
         TimerAction(period=0.0, actions=[_planner('d1', goal_radius, search_goal_radius, inspect_at_goal, goal_reached_dwell_s)]),
         TimerAction(period=2.0, actions=[_planner('d2', goal_radius, search_goal_radius, inspect_at_goal, goal_reached_dwell_s)]),
@@ -134,6 +160,11 @@ def generate_launch_description():
                     'drone_spawn_positions': drone_spawn_positions,
                     'poi_reference_tag_positions': poi_reference_tag_positions,
                     'max_tag_offset_refine_delta_m': max_tag_offset_refine_delta_m,
+                    'enable_interest_points': enable_interest_points,
+                    'interest_points': interest_points,
+                    'interest_points_preempt_frontiers': interest_points_preempt_frontiers,
+                    'interest_point_cooldown_s': interest_point_cooldown_s,
+                    'require_interest_points_for_completion': require_interest_points_for_completion,
                 }],
                 output='screen',
             )],

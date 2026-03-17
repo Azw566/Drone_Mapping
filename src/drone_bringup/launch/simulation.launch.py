@@ -6,7 +6,7 @@
 """
 
 import os
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_prefix, get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -24,11 +24,17 @@ from launch_ros.actions import Node, PushRosNamespace
 def generate_launch_description():
     pkg_dir = get_package_share_directory('drone_bringup')
 
-    world_file = os.path.join(pkg_dir, 'worlds', 'maze.sdf')
+    world_file = os.path.join(pkg_dir, 'worlds', 'maze_ceiling.sdf')
     model_path = os.path.join(pkg_dir, 'models')
     urdf_file = os.path.join(pkg_dir, 'models', 'x500_vision_lidar', 'model.urdf.xacro')
     rviz_config = os.path.join(pkg_dir, 'rviz', 'multi_drone.rviz')
     bridge_config = os.path.join(pkg_dir, 'config', 'bridge.yaml')
+    spawn_script = os.path.join(
+        get_package_prefix('drone_bringup'),
+        'lib',
+        'drone_bringup',
+        'spawn_gz_model.py',
+    )
 
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz', default_value='false',
@@ -73,38 +79,48 @@ def generate_launch_description():
 
     drone1_spawn = ExecuteProcess(
         cmd=[
-            'gz', 'service', '-s', '/world/maze/create',
-            '--reqtype', 'gz.msgs.EntityFactory',
-            '--reptype', 'gz.msgs.Boolean',
-            '--timeout', '5000',
-            '--req', (
-                f'sdf_filename: "{os.path.join(model_path, "x500_vision_lidar", "model.sdf")}", '
-                'name: "x500_d1", '
-                'pose: {position: {x: -1.0, y: -8.0, z: 0.5}}'
-            ),
+            'python3',
+            spawn_script,
+            '--world', 'maze',
+            '--model-sdf', os.path.join(model_path, 'x500_vision_lidar', 'model.sdf'),
+            '--model-name', 'x500_d1',
+            '--x', '-1.0',
+            '--y', '-8.0',
+            '--z', '0.5',
+            '--attempts', '10',
+            '--timeout-ms', '20000',
+            '--retry-delay-s', '2.0',
         ],
+        additional_env={
+            'GZ_SIM_RESOURCE_PATH': combined_resource_path,
+            'GZ_IP': '127.0.0.1',
+            'QT_QPA_PLATFORM': 'offscreen',
+            'DISPLAY': '',
+        },
         output='screen',
     )
 
-    # Delay drone 2 spawn by 2 seconds to avoid Gazebo race conditions.
-    drone2_spawn = TimerAction(
-        period=2.0,
-        actions=[
-            ExecuteProcess(
-                cmd=[
-                    'gz', 'service', '-s', '/world/maze/create',
-                    '--reqtype', 'gz.msgs.EntityFactory',
-                    '--reptype', 'gz.msgs.Boolean',
-                    '--timeout', '5000',
-                    '--req', (
-                        f'sdf_filename: "{os.path.join(model_path, "x500_vision_lidar", "model.sdf")}", '
-                        'name: "x500_d2", '
-                        'pose: {position: {x: 1.0, y: -8.0, z: 0.5}}'
-                    ),
-                ],
-                output='screen',
-            )
+    drone2_spawn = ExecuteProcess(
+        cmd=[
+            'python3',
+            spawn_script,
+            '--world', 'maze',
+            '--model-sdf', os.path.join(model_path, 'x500_vision_lidar', 'model.sdf'),
+            '--model-name', 'x500_d2',
+            '--x', '1.0',
+            '--y', '-8.0',
+            '--z', '0.5',
+            '--attempts', '10',
+            '--timeout-ms', '20000',
+            '--retry-delay-s', '2.0',
         ],
+        additional_env={
+            'GZ_SIM_RESOURCE_PATH': combined_resource_path,
+            'GZ_IP': '127.0.0.1',
+            'QT_QPA_PLATFORM': 'offscreen',
+            'DISPLAY': '',
+        },
+        output='screen',
     )
 
     # Single bridge configured via YAML to avoid magnetometer / barometer topics.
@@ -164,13 +180,13 @@ def generate_launch_description():
         gazebo_headless,
         # Wait for Gazebo to initialize before spawning
         TimerAction(period=5.0, actions=[drone1_spawn]),
-        TimerAction(period=7.0, actions=[drone2_spawn]),
+        TimerAction(period=9.0, actions=[drone2_spawn]),
         # Delay the bridge until Gazebo has finished bringing up the late
-        # sensor/odometry publishers. Starting at 8 s races the camera, lidar,
-        # and odometry topics: the bridge sees the topic names in config but
-        # misses the underlying GZ subscriptions, which leaves LIO-SAM with no
-        # points_raw input and PX4 with no VIO path.
-        TimerAction(period=10.0, actions=[bridge]),
+        # sensor/odometry publishers. Starting it too early races the camera,
+        # lidar, and odometry topics: the bridge sees the names in config but
+        # can miss the underlying GZ subscriptions, which leaves mapping with
+        # no /points_raw input.
+        TimerAction(period=14.0, actions=[bridge]),
         TimerAction(period=8.0, actions=[rsp_d1, rsp_d2]),
         rviz,
     ])

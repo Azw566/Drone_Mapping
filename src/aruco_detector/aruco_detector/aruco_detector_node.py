@@ -274,7 +274,10 @@ def main():
         if 'Unable to convert call argument to Python object' not in str(exc):
             raise
     finally:
-        node.destroy_node()
+        try:
+            node.destroy_node()
+        except KeyboardInterrupt:
+            pass
         try:
             rclpy.shutdown()
         except Exception:

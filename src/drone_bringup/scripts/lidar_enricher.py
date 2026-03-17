@@ -37,6 +37,7 @@ class LidarEnricher(Node):
         self.declare_parameter('max_vert_deg', 15.0)
         self.declare_parameter('input_topic', 'points_raw')
         self.declare_parameter('output_topic', 'points_enriched')
+        self.declare_parameter('output_frame_id', '')
 
         qos = rclpy.qos.QoSProfile(
             depth=5,
@@ -127,6 +128,9 @@ class LidarEnricher(Node):
             enriched_points.append(tuple(pt_list))
 
         out_msg = pc2.create_cloud(msg.header, fields_out, enriched_points)
+        output_frame_id = str(self.get_parameter('output_frame_id').value)
+        if output_frame_id:
+            out_msg.header.frame_id = output_frame_id
         if msg.height > 1 and len(enriched_points) == msg.width * msg.height:
             out_msg.height = msg.height
             out_msg.width = msg.width

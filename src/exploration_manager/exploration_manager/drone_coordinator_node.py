@@ -44,6 +44,14 @@ class _SearchTarget:
     last_assigned_s: float = -1.0
 
 
+@dataclass
+class _InterestPoint:
+    point: Point
+    label: str
+    last_assigned_s: float = -1.0
+    visited: bool = False
+
+
 class DroneCoordinatorNode(Node):
     def __init__(self):
         super().__init__('drone_coordinator')
@@ -64,6 +72,11 @@ class DroneCoordinatorNode(Node):
         self.declare_parameter('drone_spawn_positions', '')
         self.declare_parameter('poi_reference_tag_positions', '')
         self.declare_parameter('max_tag_offset_refine_delta_m', 1.5)
+        self.declare_parameter('enable_interest_points', False)
+        self.declare_parameter('interest_points', '')
+        self.declare_parameter('interest_points_preempt_frontiers', False)
+        self.declare_parameter('interest_point_cooldown_s', 10.0)
+        self.declare_parameter('require_interest_points_for_completion', False)
 
         namespaces = (self.get_parameter('drone_namespaces')
                       .get_parameter_value().string_array_value)
@@ -91,11 +104,25 @@ class DroneCoordinatorNode(Node):
         self._max_tag_offset_refine_delta_m = (
             self.get_parameter('max_tag_offset_refine_delta_m')
             .get_parameter_value().double_value)
+        self._enable_interest_points = (
+            self.get_parameter('enable_interest_points')
+            .get_parameter_value().bool_value)
+        self._interest_points_preempt_frontiers = (
+            self.get_parameter('interest_points_preempt_frontiers')
+            .get_parameter_value().bool_value)
+        self._interest_point_cooldown_s = (
+            self.get_parameter('interest_point_cooldown_s')
+            .get_parameter_value().double_value)
+        self._require_interest_points_for_completion = (
+            self.get_parameter('require_interest_points_for_completion')
+            .get_parameter_value().bool_value)
         self._namespaces = list(namespaces)
         self._required_tag_ids = self._parse_required_tag_ids(
             self.get_parameter('required_tag_ids').get_parameter_value().string_value)
         self._poi_search_targets = self._parse_search_targets(
             self.get_parameter('poi_search_targets').get_parameter_value().string_value)
+        self._interest_points = self._parse_interest_points(
+            self.get_parameter('interest_points').get_parameter_value().string_value)
         self._spawn_world_by_ns = self._parse_namespaced_points(
             self.get_parameter('drone_spawn_positions').get_parameter_value().string_value)
         self._tag_world_positions = self._parse_tag_points(
@@ -118,6 +145,8 @@ class DroneCoordinatorNode(Node):
         self._search_reassignment_due: set[str] = set()
         self._search_reassignment_anchor_by_ns: dict[str, Point] = {}
         self._timed_out_search_target_by_ns: dict[str, _SearchTarget] = {}
+        self._active_interest_point_by_ns: dict[str, _InterestPoint] = {}
+        self._last_status_by_ns: dict[str, str] = {}
 
         cbg = ReentrantCallbackGroup()
 
@@ -158,13 +187,25 @@ class DroneCoordinatorNode(Node):
             search_summary = (
                 f' | poi_search tags={sorted(self._required_tag_ids)} '
                 f'targets={len(self._poi_search_targets)}')
+        if self._enable_interest_points:
+            search_summary += (
+                f' | interest_points={len(self._interest_points)} '
+                f'preempt={self._interest_points_preempt_frontiers}')
         self.get_logger().info(
             f'DroneCoordinator managing: {self._namespaces}{search_summary}')
 
     # ── Callbacks ──────────────────────────────────────────────────────────
     def _state_cb(self, ns: str, msg: DroneState):
+        previous_status = self._last_status_by_ns.get(ns)
         self._states[ns] = msg
+        self._last_status_by_ns[ns] = msg.status
         self._maybe_bootstrap_map_offset(ns, msg)
+        if msg.status == _STATUS_IDLE and previous_status != _STATUS_IDLE:
+            interest_point = self._active_interest_point_by_ns.pop(ns, None)
+            if interest_point is not None and not interest_point.visited:
+                interest_point.visited = True
+                self.get_logger().info(
+                    f'[coordinator] {ns} visited interest point {interest_point.label}')
         if msg.status == _STATUS_IDLE:
             self._active_poi_search_by_ns.pop(ns, None)
             self._search_reassignment_anchor_by_ns.pop(ns, None)
@@ -240,7 +281,8 @@ class DroneCoordinatorNode(Node):
             for ns in self._namespaces)
         no_assignable_work = all_idle and all_reported and all(
             self._pick_best_frontier(ns, self._states[ns], [], now_s) is None and
-            self._pick_best_poi_search_target(ns, self._states[ns], [], now_s) is None
+            self._pick_best_poi_search_target(ns, self._states[ns], [], now_s) is None and
+            self._pick_best_interest_point(ns, self._states[ns], [], now_s) is None
             for ns in self._namespaces)
         if no_assignable_work and self._exploration_started:
             if self._no_assignable_since is None:
@@ -255,10 +297,14 @@ class DroneCoordinatorNode(Node):
             not self._enable_poi_search or
             not self._required_tag_ids or
             not missing_tags)
-        if all_idle and all_required_tags_found and (
+        all_interest_points_complete = (
+            not self._enable_interest_points or
+            not self._require_interest_points_for_completion or
+            all(point.visited for point in self._interest_points))
+        if all_idle and all_required_tags_found and all_interest_points_complete and (
                 all_frontiers_empty or no_frontiers or idle_completion_ready):
             self._mission_complete = True
-            self.get_logger().info('[coordinator] Mission complete — all frontiers exhausted')
+            self.get_logger().info('[coordinator] Mission complete — all work exhausted')
             self._pub_mission_complete.publish(Bool(data=True))
             for ns in self._namespaces:
                 self._land_pubs[ns].publish(Empty())
@@ -270,6 +316,11 @@ class DroneCoordinatorNode(Node):
             target.tag_id
             for other_ns, target in self._active_poi_search_by_ns.items()
             if other_ns not in self._search_reassignment_due
+        }
+        claimed_interest_labels = {
+            point.label
+            for other_ns, point in self._active_interest_point_by_ns.items()
+            if other_ns in self._states and self._states[other_ns].status != _STATUS_IDLE
         }
         for ns, state in self._states.items():
             if state.status != _STATUS_IDLE and ns not in self._search_reassignment_due:
@@ -293,6 +344,7 @@ class DroneCoordinatorNode(Node):
             ]
             assignment_label = 'frontier'
             search_target = None
+            interest_point = None
             best = None
             retry_target = self._timed_out_search_target_by_ns.get(ns)
             prefer_poi_search = (
@@ -300,7 +352,22 @@ class DroneCoordinatorNode(Node):
                 (self._poi_search_preempts_frontiers or search_reassign_due) and
                 bool(missing_tags)
             )
-            if prefer_poi_search:
+            prefer_interest_points = (
+                self._enable_interest_points and
+                self._interest_points_preempt_frontiers)
+            if prefer_interest_points:
+                interest_point = self._pick_best_interest_point(
+                    ns,
+                    state,
+                    other_claimed,
+                    now_s,
+                    claimed_labels=claimed_interest_labels,
+                )
+                if interest_point is not None:
+                    best = self._interest_point_in_map(ns, interest_point)
+                    interest_point.last_assigned_s = now_s
+                    assignment_label = f'interest point {interest_point.label}'
+            if best is None and prefer_poi_search:
                 search_target = self._pick_best_poi_search_target(
                     ns,
                     state,
@@ -327,6 +394,18 @@ class DroneCoordinatorNode(Node):
                     best = self._search_target_point_in_map(ns, search_target)
                     search_target.last_assigned_s = now_s
                     assignment_label = f'POI search tag {search_target.tag_id}'
+            if best is None and not prefer_interest_points:
+                interest_point = self._pick_best_interest_point(
+                    ns,
+                    state,
+                    other_claimed,
+                    now_s,
+                    claimed_labels=claimed_interest_labels,
+                )
+                if interest_point is not None:
+                    best = self._interest_point_in_map(ns, interest_point)
+                    interest_point.last_assigned_s = now_s
+                    assignment_label = f'interest point {interest_point.label}'
             if best is None:
                 if search_reassign_due:
                     self._search_reassignment_due.discard(ns)
@@ -342,14 +421,16 @@ class DroneCoordinatorNode(Node):
             req.frontier_centroid  = best
             future = self._assign_clients[ns].call_async(req)
             future.add_done_callback(
-                lambda f, n=ns, g=best, l=assignment_label, t=search_target:
-                    self._assignment_done(n, g, l, t, f))
+                lambda f, n=ns, g=best, l=assignment_label, t=search_target, i=interest_point:
+                    self._assignment_done(n, g, l, t, i, f))
 
             # Optimistically claim this goal now so a second idle drone
             # does not race to the same frontier in this same tick
             claimed_by_ns[ns] = best
             if search_target is not None:
                 claimed_search_tag_ids.add(search_target.tag_id)
+            if interest_point is not None:
+                claimed_interest_labels.add(interest_point.label)
 
     def _pick_best_frontier(self,
                             ns: str,
@@ -387,6 +468,42 @@ class DroneCoordinatorNode(Node):
                     best_centroid = centroid
 
         return best_centroid
+
+    def _pick_best_interest_point(self,
+                                  ns: str,
+                                  state: DroneState,
+                                  claimed: list[Point],
+                                  now_s: float,
+                                  claimed_labels: set[str] | None = None
+                                  ) -> _InterestPoint | None:
+        if not self._enable_interest_points or not self._interest_points:
+            return None
+        if claimed_labels is None:
+            claimed_labels = set()
+
+        drone_x = state.current_pose.pose.position.x
+        drone_y = state.current_pose.pose.position.y
+        best_interest_point = None
+        best_distance = None
+        for interest_point in self._interest_points:
+            if interest_point.visited:
+                continue
+            if interest_point.label in claimed_labels:
+                continue
+            if (now_s - interest_point.last_assigned_s) < self._interest_point_cooldown_s:
+                continue
+            map_point = self._interest_point_in_map(ns, interest_point)
+            if any(self._dist(map_point, c) < self._safety_radius for c in claimed):
+                continue
+            distance = math.hypot(
+                map_point.x - drone_x,
+                map_point.y - drone_y,
+            )
+            if best_distance is None or distance < best_distance:
+                best_distance = distance
+                best_interest_point = interest_point
+
+        return best_interest_point
 
     def _pick_best_poi_search_target(self,
                                      ns: str,
@@ -537,6 +654,18 @@ class DroneCoordinatorNode(Node):
         point.z = target.point.z
         return point
 
+    def _interest_point_in_map(self, ns: str, interest_point: _InterestPoint) -> Point:
+        point = Point()
+        offset = self._map_offset_by_ns.get(ns)
+        if offset is None:
+            point.x = interest_point.point.x
+            point.y = interest_point.point.y
+        else:
+            point.x = interest_point.point.x + offset[0]
+            point.y = interest_point.point.y + offset[1]
+        point.z = interest_point.point.z
+        return point
+
     def _maybe_bootstrap_map_offset(self, ns: str, msg: DroneState):
         if ns in self._map_offset_by_ns:
             return
@@ -645,6 +774,38 @@ class DroneCoordinatorNode(Node):
             targets.append(_SearchTarget(tag_id=tag_id, point=point, label=f'target_{idx}'))
         return targets
 
+    def _parse_interest_points(self, raw: str) -> list[_InterestPoint]:
+        interest_points = []
+        for idx, token in enumerate(raw.split(';')):
+            token = token.strip()
+            if not token:
+                continue
+            parts = [part.strip() for part in token.split(':')]
+            if len(parts) == 3:
+                label = f'interest_{idx}'
+                coord_parts = parts
+            elif len(parts) == 4:
+                label = parts[0] or f'interest_{idx}'
+                coord_parts = parts[1:]
+            else:
+                self.get_logger().warn(
+                    f'[coordinator] Ignoring malformed interest_points entry: {token}')
+                continue
+            try:
+                x = float(coord_parts[0])
+                y = float(coord_parts[1])
+                z = float(coord_parts[2])
+            except ValueError:
+                self.get_logger().warn(
+                    f'[coordinator] Ignoring non-numeric interest_points entry: {token}')
+                continue
+            point = Point()
+            point.x = x
+            point.y = y
+            point.z = z
+            interest_points.append(_InterestPoint(point=point, label=label))
+        return interest_points
+
     def _parse_namespaced_points(self, raw: str) -> dict[str, Point]:
         points = {}
         for token in raw.split(';'):
@@ -700,6 +861,7 @@ class DroneCoordinatorNode(Node):
                          goal: Point,
                          label: str,
                          search_target: _SearchTarget | None,
+                         interest_point: _InterestPoint | None,
                          future):
         try:
             res = future.result()
@@ -710,6 +872,10 @@ class DroneCoordinatorNode(Node):
                     self._active_poi_search_by_ns[ns] = search_target
                 else:
                     self._active_poi_search_by_ns.pop(ns, None)
+                if interest_point is not None:
+                    self._active_interest_point_by_ns[ns] = interest_point
+                else:
+                    self._active_interest_point_by_ns.pop(ns, None)
                 self._search_reassignment_due.discard(ns)
                 self._search_reassignment_anchor_by_ns.pop(ns, None)
                 self._timed_out_search_target_by_ns.pop(ns, None)
@@ -720,6 +886,9 @@ class DroneCoordinatorNode(Node):
                 if search_target is not None:
                     search_target.last_assigned_s = -1.0
                     self._defer_active_search_retry(ns)
+                if interest_point is not None:
+                    interest_point.last_assigned_s = -1.0
+                self._active_interest_point_by_ns.pop(ns, None)
                 self._search_reassignment_due.discard(ns)
                 self._search_reassignment_anchor_by_ns.pop(ns, None)
                 self._timed_out_search_target_by_ns.pop(ns, None)
@@ -729,6 +898,9 @@ class DroneCoordinatorNode(Node):
             if search_target is not None:
                 search_target.last_assigned_s = -1.0
                 self._defer_active_search_retry(ns)
+            if interest_point is not None:
+                interest_point.last_assigned_s = -1.0
+            self._active_interest_point_by_ns.pop(ns, None)
             self._search_reassignment_due.discard(ns)
             self._search_reassignment_anchor_by_ns.pop(ns, None)
             self._timed_out_search_target_by_ns.pop(ns, None)

@@ -29,7 +29,8 @@ Environment variables (can be overridden before launching):
 import os
 from ament_index_python.packages import get_package_prefix
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, TimerAction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
+from launch.substitutions import LaunchConfiguration
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 PX4_DIR = os.path.expanduser(
@@ -47,11 +48,14 @@ def _script_path() -> str:
     return os.path.join(pkg_prefix, 'lib', 'drone_bringup', 'launch_px4_instance.sh')
 
 
-def _px4_process(instance: int, model: str, ns: str) -> ExecuteProcess:
+def _px4_process(instance: int, model: str, ns: str, enable_vio) -> ExecuteProcess:
     return ExecuteProcess(
         cmd=['bash', _script_path(), str(instance), model, ns],
         name=f'px4_{ns}',
-        additional_env={'PX4_DIR': PX4_DIR},
+        additional_env={
+            'PX4_DIR': PX4_DIR,
+            'PX4_ENABLE_VIO': enable_vio,
+        },
         output='screen',
     )
 
@@ -65,7 +69,13 @@ def _xrce_process(port: int) -> ExecuteProcess:
 
 
 def generate_launch_description():
+    enable_vio = LaunchConfiguration('enable_vio')
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'enable_vio',
+            default_value='1',
+            description='Enable PX4 visual-odometry fusion path (1) or use SITL GPS only (0)'),
+
         # ── MicroXRCE-DDS Agents (start first so PX4 can connect) ────────────
         _xrce_process(8888),   # bridges d1 (PX4 instance 0)
         _xrce_process(8889),   # bridges d2 (PX4 instance 1)
@@ -74,6 +84,6 @@ def generate_launch_description():
         # Stagger d2 by 5 s to avoid a symlink race: both instances would
         # otherwise try to create BUILD_DIR/etc simultaneously and the second
         # one fails with exit code 255.
-        _px4_process(0, 'x500_d1', 'd1'),
-        TimerAction(period=5.0, actions=[_px4_process(1, 'x500_d2', 'd2')]),
+        _px4_process(0, 'x500_d1', 'd1', enable_vio),
+        TimerAction(period=5.0, actions=[_px4_process(1, 'x500_d2', 'd2', enable_vio)]),
     ])

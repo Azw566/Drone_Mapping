@@ -25,14 +25,14 @@ Start sequence (timers wait for upstream to be ready)
   t=5s   Spawn drone 1
   t=7s   Spawn drone 2
   t=8s   ros_gz_bridge + robot_state_publishers (inside simulation.launch)
-  t=10s  PX4 SITL instances + MicroXRCE agents
-  t=12s  LIO-SAM + visual_odom_bridges + GCS heartbeat (needs bridge + PX4 booting)
-  t=15s  OctoMap servers  (needs cloud_registered from LIO-SAM)
-  t=17s  Frontier detectors (needs projected_map from OctoMap)
-  t=18s  Auto map saver waits for /mission_complete
-  t=30s  Offboard controllers (PX4 ~done booting, EKF2 receiving VIO)
-  t=40s  Exploration planners + coordinator + POI manager
-  t=45s  ArUco detectors (optional; kept off the hot path by default)
+  t=32s  PX4 SITL instances + MicroXRCE agents
+  t=34s  LIO-SAM + visual_odom_bridges + GCS heartbeat
+  t=40s  OctoMap servers
+  t=43s  Frontier detectors
+  t=45s  Auto map saver waits for /mission_complete
+  t=52s  Offboard controllers
+  t=60s  Exploration planners + coordinator + POI manager
+  t=65s  ArUco detectors (optional; kept off the hot path by default)
 """
 
 import os
@@ -129,6 +129,7 @@ def generate_launch_description():
         # obstacle-aware local pathing, so aggressive setpoint chasing overshoots corners.
         'max_exploring_step_m': '0.08',
         'inspection_altitude_m': '3.0',
+        'force_arm_after_s': '8.0',
         # The ArUco camera is forward-facing; when detectors are enabled we yaw
         # into the active frontier so wall tags pass through the camera frustum.
         'face_goal_yaw': enable_aruco,
@@ -220,6 +221,14 @@ def generate_launch_description():
         output='screen',
     )
 
+    _ekf_bootstrap_script = os.path.join(
+        get_package_prefix('drone_bringup'), 'lib', 'drone_bringup', 'bootstrap_ekf2.py')
+    ekf_bootstrap = ExecuteProcess(
+        cmd=['python3', _ekf_bootstrap_script, '45'],
+        name='ekf2_bootstrapper',
+        output='screen',
+    )
+
     _map_saver_script = os.path.join(
         get_package_prefix('drone_bringup'), 'lib', 'drone_bringup', 'auto_save_arena_map.py')
     auto_map_saver = ExecuteProcess(
@@ -271,37 +280,30 @@ def generate_launch_description():
         # t=0s  — Gazebo world + drone spawning + bridge (internal timers)
         simulation,
 
-        # t=10s — PX4 SITL + XRCE agents (Gazebo + models must be up)
-        TimerAction(period=10.0, actions=[px4]),
+        # Let Gazebo finish spawning and sensor startup before PX4 / SLAM join.
+        TimerAction(period=32.0, actions=[px4]),
 
-        # t=12s — LIO-SAM + visual odom bridges + GCS heartbeat
-        #         (bridge must be publishing sensor topics; PX4 still booting)
-        #         GCS heartbeat starts alongside so PX4 sees a GCS by t=15s param injection
-        TimerAction(period=12.0, actions=[lio_sam, vio_bridges, gcs_heartbeat]),
+        # Start SLAM and EKF2 bootstrap after the Gazebo model spawns settle.
+        # Delay the live VIO bridge a little so PX4 can first lock onto the
+        # synthetic bootstrap odometry instead of blending two EV sources
+        # while LIO-SAM is still converging.
+        TimerAction(period=34.0, actions=[lio_sam, gcs_heartbeat, ekf_bootstrap]),
+        TimerAction(period=44.0, actions=[vio_bridges]),
 
-        # t=15s — OctoMap servers
-        TimerAction(period=15.0, actions=[octomap_d1, octomap_d2]),
+        TimerAction(period=40.0, actions=[octomap_d1, octomap_d2]),
 
         # t=30s — ArUco detectors (optional; start with offboard so the first
         #         exploration legs can already contribute tag sightings)
         GroupAction(
             condition=IfCondition(enable_aruco),
-            actions=[TimerAction(period=30.0, actions=[aruco_d1, aruco_d2])],
+            actions=[TimerAction(period=65.0, actions=[aruco_d1, aruco_d2])],
         ),
 
-        # t=17s — Frontier detectors (need projected_map from OctoMap)
-        TimerAction(period=17.0, actions=[frontier_d1, frontier_d2]),
+        TimerAction(period=43.0, actions=[frontier_d1, frontier_d2]),
 
-        # t=18s — Lightweight map saver waiting on /mission_complete
-        TimerAction(period=18.0, actions=[auto_map_saver]),
+        TimerAction(period=45.0, actions=[auto_map_saver]),
 
-        # t=30s — Offboard controllers
-        #   d1 PX4 starts t=10s, params injected t=15s
-        #   d2 PX4 starts t=15s (staggered), params injected t=20s
-        #   10s margin before offboard controllers start
-        TimerAction(period=30.0, actions=[offboard_controllers]),
+        TimerAction(period=52.0, actions=[offboard_controllers]),
 
-        # t=40s — Exploration stack (planners + coordinator + POI manager)
-        #   Give OctoMap/frontier detection time to stabilise before assigning goals.
-        TimerAction(period=40.0, actions=[exploration]),
+        TimerAction(period=60.0, actions=[exploration]),
     ])

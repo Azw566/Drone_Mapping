@@ -52,6 +52,28 @@
       </link>
     </model>
 
+    <model name="maze_ceiling">
+      <static>true</static>
+      <pose>0 0 4.6 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>19.6 19.6 0.2</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>19.6 19.6 0.2</size></box>
+          </geometry>
+          <material>
+            <ambient>0.55 0.55 0.60 0.18</ambient>
+            <diffuse>0.65 0.65 0.70 0.18</diffuse>
+          </material>
+          <transparency>0.82</transparency>
+        </visual>
+      </link>
+    </model>
+
     <model name="wall_north">
       <static>true</static>
       <pose>0 10 1 0 0 0</pose>

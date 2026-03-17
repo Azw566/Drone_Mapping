@@ -25,8 +25,15 @@ install(PROGRAMS
   scripts/save_arena_map.py
   scripts/auto_save_arena_map.py
   scripts/gcs_heartbeat.py
+  scripts/bootstrap_ekf2.py
+  scripts/px4_health_monitor.py
   scripts/fullstack_acceptance.sh
+  scripts/fullstack_cleanup.sh
+  scripts/simple_mapping_patrol.py
+  scripts/cloud_to_map.py
+  scripts/gz_pose_to_tf.py
   scripts/wait_for_vio.py
+  scripts/spawn_gz_model.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

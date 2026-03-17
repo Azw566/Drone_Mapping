@@ -34,6 +34,7 @@ def _controller(ns: str, hover_alt: LaunchConfiguration,
                 search_goal_radius_m: LaunchConfiguration,
                 max_exploring_step_m: LaunchConfiguration,
                 inspection_altitude_m: LaunchConfiguration,
+                force_arm_after_s: LaunchConfiguration,
                 face_goal_yaw: LaunchConfiguration,
                 goal_scan_enabled: LaunchConfiguration,
                 goal_scan_duration_s: LaunchConfiguration,
@@ -51,6 +52,7 @@ def _controller(ns: str, hover_alt: LaunchConfiguration,
             'search_goal_radius_m': search_goal_radius_m,
             'max_exploring_step_m': max_exploring_step_m,
             'inspection_altitude_m': inspection_altitude_m,
+            'force_arm_after_s': force_arm_after_s,
             'face_goal_yaw': face_goal_yaw,
             'goal_scan_enabled': goal_scan_enabled,
             'goal_scan_duration_s': goal_scan_duration_s,
@@ -70,6 +72,7 @@ def generate_launch_description():
     search_goal_radius_m = LaunchConfiguration('search_goal_radius_m')
     max_exploring_step_m = LaunchConfiguration('max_exploring_step_m')
     inspection_altitude_m = LaunchConfiguration('inspection_altitude_m')
+    force_arm_after_s = LaunchConfiguration('force_arm_after_s')
     face_goal_yaw = LaunchConfiguration('face_goal_yaw')
     goal_scan_enabled = LaunchConfiguration('goal_scan_enabled')
     goal_scan_duration_s = LaunchConfiguration('goal_scan_duration_s')
@@ -109,6 +112,10 @@ def generate_launch_description():
             default_value='1.5',
             description='Altitude used during the in-place tag inspection scan'),
         DeclareLaunchArgument(
+            'force_arm_after_s',
+            default_value='0.0',
+            description='After this many seconds in ARMING, force arm in SITL (0 disables)'),
+        DeclareLaunchArgument(
             'face_goal_yaw',
             default_value='false',
             description='Yaw toward the active exploration goal'),
@@ -135,6 +142,7 @@ def generate_launch_description():
             search_goal_radius_m,
             max_exploring_step_m,
             inspection_altitude_m,
+            force_arm_after_s,
             face_goal_yaw,
             goal_scan_enabled,
             goal_scan_duration_s,
@@ -149,6 +157,7 @@ def generate_launch_description():
             search_goal_radius_m,
             max_exploring_step_m,
             inspection_altitude_m,
+            force_arm_after_s,
             face_goal_yaw,
             goal_scan_enabled,
             goal_scan_duration_s,

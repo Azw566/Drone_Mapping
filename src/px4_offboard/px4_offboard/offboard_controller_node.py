@@ -73,6 +73,7 @@ GOAL_SCAN_DURATION_S = 8.0
 GOAL_SCAN_YAWSPEED_RAD_S = 0.6
 HOVER_READY_TOLERANCE_M = 0.5
 INSPECTION_ALTITUDE_M = HOVER_ALT_M
+FORCE_ARM_AFTER_S = 0.0
 
 
 class OffboardControllerNode(Node):
@@ -86,6 +87,7 @@ class OffboardControllerNode(Node):
         self.declare_parameter('search_goal_radius_m', SEARCH_GOAL_RADIUS_M)
         self.declare_parameter('max_exploring_step_m', MAX_EXPLORING_STEP_M)
         self.declare_parameter('inspection_altitude_m', INSPECTION_ALTITUDE_M)
+        self.declare_parameter('force_arm_after_s', FORCE_ARM_AFTER_S)
         self.declare_parameter('face_goal_yaw', FACE_GOAL_YAW)
         self.declare_parameter('goal_scan_enabled', GOAL_SCAN_ENABLED)
         self.declare_parameter('goal_scan_duration_s', GOAL_SCAN_DURATION_S)
@@ -104,6 +106,8 @@ class OffboardControllerNode(Node):
             self.get_parameter('max_exploring_step_m').get_parameter_value().double_value)
         self._inspection_altitude_m = (
             self.get_parameter('inspection_altitude_m').get_parameter_value().double_value)
+        self._force_arm_after_s = (
+            self.get_parameter('force_arm_after_s').get_parameter_value().double_value)
         self._face_goal_yaw = (
             self.get_parameter('face_goal_yaw').get_parameter_value().bool_value)
         self._goal_scan_enabled = (
@@ -157,11 +161,14 @@ class OffboardControllerNode(Node):
         self._pos_ned    = [0.0, 0.0, 0.0]   # current NED position from PX4
         self._home_ned   = None               # NED position at first position fix
         self._lio_pos_enu = None              # current ENU position from LIO-SAM
+        self._xy_valid   = False
+        self._v_xy_valid = False
         self._goal_enu   = None               # latest goal in ENU map frame
         self._pre_arm_start = None
         self._arm_last_attempt = None         # last time arm command was sent
         self._px4_us     = 0                  # latest PX4 timestamp (µs) from VehicleLocalPosition
         self._auto_start_enabled = True       # only auto-arm once per process
+        self._arming_started_s = None
         self._inspect_started_s = None
         self._inspection_altitude_override_m = None
         # ── Main control timer (10 Hz) ───────────────────────────────────────
@@ -184,10 +191,14 @@ class OffboardControllerNode(Node):
     def _pos_cb(self, msg: VehicleLocalPosition):
         self._px4_us  = msg.timestamp          # track PX4 clock to stamp our outgoing msgs
         self._pos_ned = [msg.x, msg.y, msg.z]
-        if self._home_ned is None and msg.xy_valid and msg.z_valid:
+        self._xy_valid = bool(msg.xy_valid)
+        self._v_xy_valid = bool(msg.v_xy_valid)
+        if (self._home_ned is None and msg.z_valid and
+                all(math.isfinite(value) for value in (msg.x, msg.y, msg.z))):
             self._home_ned = [msg.x, msg.y, msg.z]
+            fix_quality = 'xy+z valid' if msg.xy_valid else 'z-valid bootstrap'
             self.get_logger().info(
-                f'[{self._ns}] Home NED: {self._home_ned}')
+                f'[{self._ns}] Home NED ({fix_quality}): {self._home_ned}')
 
     def _lio_cb(self, msg: Odometry):
         p = msg.pose.pose.position
@@ -220,8 +231,9 @@ class OffboardControllerNode(Node):
                 self.get_logger().info(f'[{self._ns}] → PRE_ARM')
 
         elif self._state == _PRE_ARM:
-            self._publish_ocm()
-            self._publish_hold_setpoint()
+            velocity_mode = self._bootstrap_velocity_mode()
+            self._publish_ocm(velocity_mode=velocity_mode)
+            self._publish_bootstrap_setpoint(velocity_mode=velocity_mode)
             elapsed = (now - self._pre_arm_start).nanoseconds * 1e-9
             if elapsed >= PRE_ARM_SECS:
                 self._state = _SWITCHING
@@ -232,11 +244,13 @@ class OffboardControllerNode(Node):
         elif self._state == _SWITCHING:
             # Step 1: keep publishing OCM+setpoints and retry OFFBOARD mode switch
             # until PX4 confirms nav_state == OFFBOARD (14).
-            self._publish_ocm()
-            self._publish_hold_setpoint()
+            velocity_mode = self._bootstrap_velocity_mode()
+            self._publish_ocm(velocity_mode=velocity_mode)
+            self._publish_bootstrap_setpoint(velocity_mode=velocity_mode)
             if self._nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
                 self._state = _ARMING
                 self._arm_last_attempt = now
+                self._arming_started_s = now_s
                 self.get_logger().info(f'[{self._ns}] → ARMING (OFFBOARD confirmed, now arm)')
                 self._send_arm_command()
             else:
@@ -246,15 +260,22 @@ class OffboardControllerNode(Node):
 
         elif self._state == _ARMING:
             # Step 2: OFFBOARD mode is active; retry arm until armed.
-            self._publish_ocm()
-            self._publish_hold_setpoint()
+            velocity_mode = self._bootstrap_velocity_mode()
+            self._publish_ocm(velocity_mode=velocity_mode)
+            self._publish_bootstrap_setpoint(velocity_mode=velocity_mode)
             if self._arm_state == 2:   # ARMED
                 self._state = _TAKING_OFF
+                self._arming_started_s = None
                 self.get_logger().info(f'[{self._ns}] → TAKING_OFF (armed in OFFBOARD)')
             else:
+                force_arm = (
+                    self._force_arm_after_s > 0.0
+                    and self._arming_started_s is not None
+                    and (now_s - self._arming_started_s) >= self._force_arm_after_s
+                )
                 if (now - self._arm_last_attempt).nanoseconds * 1e-9 >= 2.0:
                     self._arm_last_attempt = now
-                    self._send_arm_command()
+                    self._send_arm_command(force=force_arm)
 
         elif self._state == _OFFBOARD:
             # Legacy fallback (shouldn't be reached with new flow)
@@ -356,6 +377,20 @@ class OffboardControllerNode(Node):
         msg.yaw = _NAN  # hold current heading — don't rotate to north
         self._pub_sp.publish(msg)
 
+    def _publish_velocity_hold_setpoint(self):
+        msg = TrajectorySetpoint()
+        msg.timestamp = self._now_us()
+        msg.position = [_NAN, _NAN, _NAN]
+        msg.velocity = [0.0, 0.0, 0.0]
+        msg.yaw = _NAN
+        self._pub_sp.publish(msg)
+
+    def _publish_bootstrap_setpoint(self, velocity_mode: bool):
+        if velocity_mode:
+            self._publish_velocity_hold_setpoint()
+        else:
+            self._publish_hold_setpoint()
+
     def _publish_takeoff_setpoint(self):
         """Climb at a steady velocity (velocity mode) to avoid aggressive spool-up from ground."""
         msg = TrajectorySetpoint()
@@ -412,6 +447,9 @@ class OffboardControllerNode(Node):
         msg.yaw       = _NAN
         self._pub_sp.publish(msg)
 
+    def _bootstrap_velocity_mode(self) -> bool:
+        return not self._xy_valid or not self._v_xy_valid
+
     def _send_disarm_command(self):
         msg = VehicleCommand()
         msg.timestamp     = self._now_us()
@@ -420,13 +458,21 @@ class OffboardControllerNode(Node):
         msg.from_external = True
         self._pub_cmd.publish(msg)
 
-    def _send_arm_command(self):
+    def _send_arm_command(self, force: bool = False):
         msg = VehicleCommand()
         msg.timestamp      = self._now_us()
         msg.command        = VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM
         msg.param1         = 1.0   # arm
-        msg.from_external  = True
+        msg.param2         = 21196.0 if force else 0.0
+        # PX4 only honors the force-arm magic number for non-external commands.
+        # In this stack we are already publishing directly to the internal FMU
+        # uORB bridge, so using from_external=False is the pragmatic SITL path.
+        msg.from_external  = not force
         self._pub_cmd.publish(msg)
+        if force:
+            self.get_logger().warn(
+                f'[{self._ns}] Force-arming in SITL after '
+                f'{self._force_arm_after_s:.1f}s of failed normal arm attempts')
 
     def _send_offboard_command(self):
         msg = VehicleCommand()

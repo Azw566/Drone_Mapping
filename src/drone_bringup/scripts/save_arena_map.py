@@ -37,6 +37,7 @@ except ImportError:
     sys.exit("ERROR: OpenCV not found. Install: pip install opencv-python")
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid
 from drone_interfaces.msg import ArucoDetection
@@ -58,7 +59,19 @@ _PALETTE = [
 class MapSaverNode(Node):
     def __init__(self, output_path: str):
         super().__init__('map_saver')
+        self.declare_parameter('crop_world_x_bounds_m', [-10.8, 10.8])
+        self.declare_parameter('crop_world_y_bounds_m', [-10.8, 10.8])
+        self.declare_parameter('show_legend', False)
+        self.declare_parameter('tag_margin_m', 0.6)
+        self.declare_parameter('show_scale_bar', False)
         self._output_path = output_path
+        self._crop_world_x_bounds = list(
+            self.get_parameter('crop_world_x_bounds_m').value)
+        self._crop_world_y_bounds = list(
+            self.get_parameter('crop_world_y_bounds_m').value)
+        self._show_legend = bool(self.get_parameter('show_legend').value)
+        self._tag_margin_m = float(self.get_parameter('tag_margin_m').value)
+        self._show_scale_bar = bool(self.get_parameter('show_scale_bar').value)
         self._maps: dict[str, OccupancyGrid] = {}           # ns → latest grid
         self._tags: dict[int, ArucoDetection] = {}          # tag_id → detection
         self._lock = threading.Lock()
@@ -113,6 +126,22 @@ class MapSaverNode(Node):
             world_max_x = max(world_max_x, wx)
             world_max_y = max(world_max_y, wy)
 
+        # Expand the canvas just enough to keep detected tags visible.
+        for det in tags.values():
+            wx = det.world_pose.pose.position.x
+            wy = det.world_pose.pose.position.y
+            world_min_x = min(world_min_x, wx - self._tag_margin_m)
+            world_min_y = min(world_min_y, wy - self._tag_margin_m)
+            world_max_x = max(world_max_x, wx + self._tag_margin_m)
+            world_max_y = max(world_max_y, wy + self._tag_margin_m)
+
+        # Clamp the rendered canvas to the known maze footprint so occasional
+        # outlier cells do not bloat the final image.
+        world_min_x = max(world_min_x, self._crop_world_x_bounds[0])
+        world_max_x = min(world_max_x, self._crop_world_x_bounds[1])
+        world_min_y = max(world_min_y, self._crop_world_y_bounds[0])
+        world_max_y = min(world_max_y, self._crop_world_y_bounds[1])
+
         canvas_w = max(1, int(math.ceil((world_max_x - world_min_x) / res)))
         canvas_h = max(1, int(math.ceil((world_max_y - world_min_y) / res)))
 
@@ -156,21 +185,22 @@ class MapSaverNode(Node):
                             canvas[cy, cx] = colour
 
         # ── Step 3: draw a scale bar ──────────────────────────────────────
-        bar_metres   = 5.0
-        bar_px       = int(bar_metres / res)
-        margin       = 20
-        bar_y        = canvas_h - margin
-        bar_x_start  = margin
-        bar_x_end    = bar_x_start + bar_px
-        cv2.line(canvas, (bar_x_start, bar_y), (bar_x_end, bar_y),
-                 (0, 0, 0), 3)
-        cv2.line(canvas, (bar_x_start, bar_y - 5), (bar_x_start, bar_y + 5),
-                 (0, 0, 0), 2)
-        cv2.line(canvas, (bar_x_end,   bar_y - 5), (bar_x_end,   bar_y + 5),
-                 (0, 0, 0), 2)
-        cv2.putText(canvas, f'{bar_metres:.0f} m',
-                    (bar_x_start, bar_y - 8),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1)
+        if self._show_scale_bar:
+            bar_metres   = 5.0
+            bar_px       = int(bar_metres / res)
+            margin       = 20
+            bar_y        = canvas_h - margin
+            bar_x_start  = margin
+            bar_x_end    = bar_x_start + bar_px
+            cv2.line(canvas, (bar_x_start, bar_y), (bar_x_end, bar_y),
+                     (0, 0, 0), 3)
+            cv2.line(canvas, (bar_x_start, bar_y - 5), (bar_x_start, bar_y + 5),
+                     (0, 0, 0), 2)
+            cv2.line(canvas, (bar_x_end,   bar_y - 5), (bar_x_end,   bar_y + 5),
+                     (0, 0, 0), 2)
+            cv2.putText(canvas, f'{bar_metres:.0f} m',
+                        (bar_x_start, bar_y - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1)
 
         # ── Step 4: draw drone start positions ────────────────────────────
         start_positions = {
@@ -206,42 +236,38 @@ class MapSaverNode(Node):
 
             # Star marker
             cv2.drawMarker(canvas, (px, py), colour,
-                           cv2.MARKER_STAR, 20, 2)
+                           cv2.MARKER_STAR, 12, 1)
             # Circle outline
-            cv2.circle(canvas, (px, py), 12, colour, 2)
+            cv2.circle(canvas, (px, py), 7, colour, 1)
             # Label
             label = f'ID {tag_id} (by {det.detected_by})'
-            cv2.putText(canvas, label, (px + 14, py + 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour, 1)
+            cv2.putText(canvas, label, (px + 8, py + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.28, colour, 1)
 
         # ── Step 6: legend ────────────────────────────────────────────────
-        legend_x = canvas_w - 180
-        legend_y = 20
-        cv2.rectangle(canvas, (legend_x - 5, legend_y - 5),
-                      (canvas_w - 5, legend_y + 90), (200, 200, 200), -1)
-        cv2.rectangle(canvas, (legend_x - 5, legend_y - 5),
-                      (canvas_w - 5, legend_y + 90), (0, 0, 0), 1)
-        entries = [
-            ((255, 255, 255), 'Free (explored)'),
-            ((30,  30,  30 ), 'Occupied (wall)'),
-            ((128, 128, 128), 'Unknown'),
-            ((200, 100, 0  ), 'Drone start'),
-            ((0,   0,   255), 'ArUco tag'),
-        ]
-        for i, (c, label) in enumerate(entries):
-            y = legend_y + i * 17
-            cv2.rectangle(canvas, (legend_x, y), (legend_x + 12, y + 12), c, -1)
-            cv2.rectangle(canvas, (legend_x, y), (legend_x + 12, y + 12), (0, 0, 0), 1)
-            cv2.putText(canvas, label, (legend_x + 16, y + 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 0, 0), 1)
+        if self._show_legend:
+            legend_x = canvas_w - 180
+            legend_y = 20
+            cv2.rectangle(canvas, (legend_x - 5, legend_y - 5),
+                          (canvas_w - 5, legend_y + 90), (200, 200, 200), -1)
+            cv2.rectangle(canvas, (legend_x - 5, legend_y - 5),
+                          (canvas_w - 5, legend_y + 90), (0, 0, 0), 1)
+            entries = [
+                ((255, 255, 255), 'Free (explored)'),
+                ((30,  30,  30 ), 'Occupied (wall)'),
+                ((128, 128, 128), 'Unknown'),
+                ((200, 100, 0  ), 'Drone start'),
+                ((0,   0,   255), 'ArUco tag'),
+            ]
+            for i, (c, label) in enumerate(entries):
+                y = legend_y + i * 17
+                cv2.rectangle(canvas, (legend_x, y), (legend_x + 12, y + 12), c, -1)
+                cv2.rectangle(canvas, (legend_x, y), (legend_x + 12, y + 12), (0, 0, 0), 1)
+                cv2.putText(canvas, label, (legend_x + 16, y + 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 0, 0), 1)
 
-        # ── Step 7: title ─────────────────────────────────────────────────
+        # ── Step 7: save ──────────────────────────────────────────────────
         n_tags = len(tags)
-        title  = f'Arena map — {n_tags} ArUco tag(s) found'
-        cv2.putText(canvas, title, (10, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-
-        # ── Step 8: save ──────────────────────────────────────────────────
         out_dir = os.path.dirname(self._output_path)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
@@ -282,7 +308,13 @@ def main():
     signal.signal(signal.SIGINT, _shutdown)
 
     # Spin in a background thread so the main thread can monitor
-    spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+    def _spin():
+        try:
+            rclpy.spin(node)
+        except ExternalShutdownException:
+            pass
+
+    spin_thread = threading.Thread(target=_spin, daemon=True)
     spin_thread.start()
 
     start = time.time()
@@ -306,7 +338,10 @@ def main():
 
     node.save()
     node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.shutdown()
+    except Exception:
+        pass
     spin_thread.join(timeout=2.0)
 
 

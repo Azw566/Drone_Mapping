@@ -232,7 +232,7 @@ class ExplorationPlannerNode(Node):
         self._last_goal_publish_s = self.get_clock().now().nanoseconds * 1e-9
 
     def _flight_ready(self) -> bool:
-        if not (self._px4_xy_valid and self._px4_z_valid):
+        if not self._px4_z_valid:
             return False
         target_z_ned = -self._hover_alt
         px4_ready = abs(self._px4_z_ned - target_z_ned) <= self._hover_ready_tolerance_m
@@ -240,8 +240,8 @@ class ExplorationPlannerNode(Node):
         return px4_ready and lio_ready
 
     def _assignment_ready(self) -> tuple[bool, str]:
-        if not self._px4_xy_valid or not self._px4_z_valid:
-            return False, 'vehicle pose invalid'
+        if not self._px4_z_valid:
+            return False, 'vehicle altitude invalid'
         if not all(math.isfinite(value) for value in self._pos_enu):
             return False, 'lio pose invalid'
         if self._status == _STATUS_TAKING_OFF and not self._flight_ready():

@@ -15,7 +15,7 @@ ENU → NED position:
   ned_z = -enu_z   (Down   = -ENU-z)
 
 ENU → NED quaternion:
-  Apply rotation q_R = [w=0, x=√2/2, y=√2/2, z=0] (Hamilton)
+  Apply the world-frame rotation q_R = [w=0, x=√2/2, y=√2/2, z=0].
   q_NED = q_R ⊗ q_ENU
 """
 
@@ -37,6 +37,7 @@ _QR_Y = _SQRT2_2
 _QR_Z = 0.0
 
 _NAN = float('nan')
+_DEBUG_SAMPLES = 5
 
 
 def _hamilton(q1w, q1x, q1y, q1z, q2w, q2x, q2y, q2z):
@@ -77,6 +78,7 @@ class VisualOdomBridgeNode(Node):
 
         self._px4_us = 0   # latest PX4 clock value (µs), updated from vehicle_local_position
         self._msg_count = 0
+        self._debug_count = 0
 
         self.pub = self.create_publisher(VehicleOdometry, vio_topic, px4_qos)
         self.sub = self.create_subscription(
@@ -121,9 +123,13 @@ class VisualOdomBridgeNode(Node):
         rz = msg.pose.pose.orientation.z
         rw = msg.pose.pose.orientation.w
 
-        # q_NED = q_R ⊗ q_ENU  (both in Hamiltonian w,x,y,z)
-        nw, nx, ny, nz = _hamilton(_QR_W, _QR_X, _QR_Y, _QR_Z,
-                                    rw,     rx,     ry,     rz)
+        # The simpler ENU→NED rotation is the last known-good path for PX4
+        # EKF2 fusion in this repo. The extra FLU→FRD body flip regressed
+        # horizontal validity during bootstrap.
+        nw, nx, ny, nz = _hamilton(
+            _QR_W, _QR_X, _QR_Y, _QR_Z,
+            rw, rx, ry, rz,
+        )
 
         # ── Linear velocity ENU → NED ────────────────────────────────────────
         vx_e = msg.twist.twist.linear.x
@@ -141,12 +147,25 @@ class VisualOdomBridgeNode(Node):
         out.velocity_frame = VehicleOdometry.VELOCITY_FRAME_NED
         out.velocity       = [ vy_e,  vx_e, -vz_e]
 
-        # Leave variances at NaN so PX4 uses its own tuning
+        # Keep PX4's own noise tuning, but advertise that the odometry is valid.
         out.position_variance    = [_NAN, _NAN, _NAN]
         out.orientation_variance = [_NAN, _NAN, _NAN]
         out.velocity_variance    = [_NAN, _NAN, _NAN]
+        out.reset_counter        = 0
+        out.quality              = 100
 
         self.pub.publish(out)
+        if self._debug_count < _DEBUG_SAMPLES:
+            self._debug_count += 1
+            self.get_logger().info(
+                f'[{self.get_parameter("drone_ns").get_parameter_value().string_value}] '
+                f'pub VIO#{self._debug_count} ts={out.timestamp} sample={out.timestamp_sample} '
+                f'pose_frame={out.pose_frame} vel_frame={out.velocity_frame} '
+                f'pos={list(out.position)} vel={list(out.velocity)} q={list(out.q)} '
+                f'pos_var={list(out.position_variance)} '
+                f'ori_var={list(out.orientation_variance)} '
+                f'vel_var={list(out.velocity_variance)} quality={out.quality}'
+            )
 
 
 def main():
