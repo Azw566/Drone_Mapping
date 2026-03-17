@@ -64,6 +64,41 @@ def generate_launch_description():
     save_map_on_complete = LaunchConfiguration('save_map_on_complete')
     map_output_path = LaunchConfiguration('map_output_path')
     map_save_delay_s = LaunchConfiguration('map_save_delay_s')
+    poi_search_targets = (
+        '0:-8.2:-7.5:2.6;'
+        '0:-7.2:-7.5:2.6;'
+        '1:8.2:-7.5:2.6;'
+        '1:7.2:-7.5:2.6;'
+        # Tag 2 / 3 normals face north in the maze world, so their search
+        # viewpoints need to stay on the north side of the wall.
+        '2:-7.5:8.8:2.0;'
+        '2:-7.5:9.8:2.0;'
+        '2:-6.3:9.2:2.0;'
+        '2:-8.7:9.2:2.0;'
+        '2:-6.8:10.4:2.0;'
+        '2:-8.2:10.4:2.0;'
+        '3:7.5:8.8:2.0;'
+        '3:7.5:9.8:2.0;'
+        '3:6.3:9.2:2.0;'
+        '3:8.7:9.2:2.0;'
+        '3:6.8:10.4:2.0;'
+        '3:8.2:10.4:2.0;'
+        # Tag 4 faces west, so bias the search to west-side scan points and
+        # descend a bit lower during the scan for a stronger camera angle.
+        '4:-2.8:1.8:2.0;'
+        '4:-2.6:2.5:2.0;'
+        '4:-2.8:3.2:2.0;'
+        '4:-1.8:1.6:2.0;'
+        '4:-1.8:3.4:2.0'
+    )
+    drone_spawn_positions = 'd1:-1.0:-8.0;d2:1.0:-8.0'
+    poi_reference_tag_positions = (
+        '0:-9.89:-7.5;'
+        '1:9.89:-7.5;'
+        '2:-7.5:7.61;'
+        '3:7.5:7.61;'
+        '4:-0.11:2.5'
+    )
 
     # ── Simulation: Gazebo + spawning + bridge + RSPs ─────────────────────
     headless = LaunchConfiguration('headless')
@@ -88,12 +123,20 @@ def generate_launch_description():
         # no maze-aware path planner yet, so staying below the 2 m walls
         # guarantees collisions once exploration starts.
         'hover_alt': '3.0',
+        'goal_radius_m': '1.0',
+        'search_goal_radius_m': '3.0',
         # Keep horizontal motion slow enough for the maze; the planner has no
         # obstacle-aware local pathing, so aggressive setpoint chasing overshoots corners.
         'max_exploring_step_m': '0.08',
+        'inspection_altitude_m': '3.0',
         # The ArUco camera is forward-facing; when detectors are enabled we yaw
         # into the active frontier so wall tags pass through the camera frustum.
         'face_goal_yaw': enable_aruco,
+        # Give the camera a short in-place scan when a frontier is reached so
+        # tags do not depend entirely on the exact approach heading.
+        'goal_scan_enabled': enable_aruco,
+        'goal_scan_duration_s': '20.0',
+        'goal_scan_yawspeed_rad_s': '0.45',
     })
 
     # ── OctoMap servers ───────────────────────────────────────────────────
@@ -134,12 +177,39 @@ def generate_launch_description():
 
     # ── ArUco detectors ───────────────────────────────────────────────────
     aruco_d1 = _include('aruco_detector', 'aruco_detector.launch.py',
-                        {'drone_ns': 'd1', 'marker_size': '0.6'})
+                        {
+                            'drone_ns': 'd1',
+                            'marker_size': '0.6',
+                            'min_confidence': '0.01',
+                            'max_detection_distance_m': '12.0',
+                        })
     aruco_d2 = _include('aruco_detector', 'aruco_detector.launch.py',
-                        {'drone_ns': 'd2', 'marker_size': '0.6'})
+                        {
+                            'drone_ns': 'd2',
+                            'marker_size': '0.6',
+                            'min_confidence': '0.01',
+                            'max_detection_distance_m': '12.0',
+                        })
 
     # ── Exploration intelligence (planners + coordinator + POI manager) ───
-    exploration = _include('exploration_manager', 'exploration_manager.launch.py')
+    exploration = _include('exploration_manager', 'exploration_manager.launch.py', {
+        'goal_radius': '1.0',
+        'search_goal_radius': '3.0',
+        'inspect_at_goal': enable_aruco,
+        'goal_reached_dwell_s': '20.0',
+        'enable_poi_search': enable_aruco,
+        'required_tag_ids': '0,1,2,3,4',
+        'poi_search_preempts_frontiers': enable_aruco,
+        'drone_spawn_positions': drone_spawn_positions,
+        'poi_reference_tag_positions': poi_reference_tag_positions,
+        'max_tag_offset_refine_delta_m': '1.5',
+        # The maze tags are wall-mounted, so once frontier work dries up we
+        # deliberately visit a small set of scan viewpoints instead of relying
+        # on chance sightings from the mapping path alone.
+        'poi_search_targets': poi_search_targets,
+        'poi_search_cooldown_s': '12.0',
+        'poi_search_leg_timeout_s': '90.0',
+    })
 
     # ── GCS heartbeat (satisfies PX4 'no GCS connection' preflight check) ─
     _heartbeat_script = os.path.join(

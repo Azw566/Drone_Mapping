@@ -32,6 +32,7 @@ from px4_msgs.msg import BatteryStatus, VehicleLocalPosition
 _STATUS_IDLE      = 'idle'
 _STATUS_EXPLORING = 'exploring'
 _STATUS_TAKING_OFF = 'taking_off'
+_STATUS_INSPECTING = 'inspecting'
 
 
 class ExplorationPlannerNode(Node):
@@ -40,15 +41,20 @@ class ExplorationPlannerNode(Node):
 
         self.declare_parameter('drone_ns', 'd1')
         self.declare_parameter('goal_radius', 0.8)
+        self.declare_parameter('search_goal_radius', 0.8)
         self.declare_parameter('hover_alt', 3.0)
         self.declare_parameter('hover_ready_tolerance_m', 0.5)
         self.declare_parameter('tick_period_s', 0.5)
         self.declare_parameter('state_publish_period_s', 1.0)
         self.declare_parameter('goal_republish_period_s', 2.0)
+        self.declare_parameter('inspect_at_goal', False)
+        self.declare_parameter('goal_reached_dwell_s', 8.0)
 
         ns   = self.get_parameter('drone_ns').get_parameter_value().string_value
         self._ns          = ns
         self._goal_radius = self.get_parameter('goal_radius').get_parameter_value().double_value
+        self._search_goal_radius = (
+            self.get_parameter('search_goal_radius').get_parameter_value().double_value)
         self._hover_alt = self.get_parameter('hover_alt').get_parameter_value().double_value
         self._hover_ready_tolerance_m = (
             self.get_parameter('hover_ready_tolerance_m').get_parameter_value().double_value)
@@ -57,6 +63,10 @@ class ExplorationPlannerNode(Node):
             self.get_parameter('state_publish_period_s').get_parameter_value().double_value)
         self._goal_republish_period_s = (
             self.get_parameter('goal_republish_period_s').get_parameter_value().double_value)
+        self._inspect_at_goal = (
+            self.get_parameter('inspect_at_goal').get_parameter_value().bool_value)
+        self._goal_reached_dwell_s = (
+            self.get_parameter('goal_reached_dwell_s').get_parameter_value().double_value)
 
         # ── Publishers ───────────────────────────────────────────────────────
         self._pub_goal  = self.create_publisher(Point, f'/{ns}/goal_pose', 10)
@@ -94,6 +104,7 @@ class ExplorationPlannerNode(Node):
         self._px4_xy_valid = False
         self._px4_z_valid = False
         self._ready_logged = False
+        self._inspection_started_s = None
 
         self.create_timer(self._state_publish_period_s, self._publish_state)
         self.create_timer(self._tick_period_s, self._tick)
@@ -118,12 +129,14 @@ class ExplorationPlannerNode(Node):
     def _assign_cb(self, req: AssignFrontier.Request,
                    res: AssignFrontier.Response) -> AssignFrontier.Response:
         """Coordinator hands us a frontier centroid to explore."""
-        if not self._flight_ready():
+        ready, reason = self._assignment_ready()
+        if not ready:
             res.accepted = False
-            res.reason = 'vehicle not ready for exploration'
+            res.reason = reason
             return res
         self._goal = req.frontier_centroid
         self._status = _STATUS_EXPLORING
+        self._inspection_started_s = None
         # Publish state immediately so monitors see 'exploring' before the next
         # planner tick can transition back to 'idle'.
         self._publish_state()
@@ -138,35 +151,59 @@ class ExplorationPlannerNode(Node):
 
     # ── Tick ───────────────────────────────────────────────────────────────
     def _tick(self):
+        now_s = self.get_clock().now().nanoseconds * 1e-9
+
         if self._status != _STATUS_EXPLORING:
             ready = self._flight_ready()
-            next_status = _STATUS_IDLE if ready else _STATUS_TAKING_OFF
-            if next_status != self._status:
-                self._status = next_status
+            if self._status != _STATUS_INSPECTING:
+                next_status = _STATUS_IDLE if ready else _STATUS_TAKING_OFF
+                if next_status != self._status:
+                    self._status = next_status
             if ready and not self._ready_logged:
                 self.get_logger().info(f'[{self._ns}] Ready for frontier assignments')
                 self._ready_logged = True
 
         if self._status == _STATUS_EXPLORING and self._goal is not None:
             if self._at_goal():
-                self.get_logger().info(
-                    f'[{self._ns}] Reached frontier — idle')
-                self._goal   = None
-                self._status = _STATUS_IDLE
-                self._last_goal_publish_s = None
+                if self._inspect_at_goal and self._goal_reached_dwell_s > 0.0:
+                    self._status = _STATUS_INSPECTING
+                    self._inspection_started_s = now_s
+                    self.get_logger().info(
+                        f'[{self._ns}] Reached frontier — inspecting for '
+                        f'{self._goal_reached_dwell_s:.1f}s')
+                else:
+                    self.get_logger().info(
+                        f'[{self._ns}] Reached frontier — idle')
+                    self._goal   = None
+                    self._status = _STATUS_IDLE
+                    self._last_goal_publish_s = None
                 return
 
-            now_s = self.get_clock().now().nanoseconds * 1e-9
             if (self._last_goal_publish_s is None or
                     (now_s - self._last_goal_publish_s) >= self._goal_republish_period_s):
                 self._publish_goal()
+        elif self._status == _STATUS_INSPECTING:
+            if (self._inspection_started_s is not None and
+                    (now_s - self._inspection_started_s) >= self._goal_reached_dwell_s):
+                next_status = _STATUS_IDLE if self._flight_ready() else _STATUS_TAKING_OFF
+                self.get_logger().info(
+                    f'[{self._ns}] Inspection complete — {next_status}')
+                self._goal = None
+                self._status = next_status
+                self._inspection_started_s = None
+                self._last_goal_publish_s = None
 
     def _at_goal(self) -> bool:
         if self._goal is None:
             return False
         dx = self._pos_enu[0] - self._goal.x
         dy = self._pos_enu[1] - self._goal.y
-        return math.sqrt(dx*dx + dy*dy) < self._goal_radius
+        goal_radius = (
+            self._search_goal_radius
+            if float(self._goal.z) > 0.0
+            else self._goal_radius
+        )
+        return math.sqrt(dx*dx + dy*dy) < goal_radius
 
     # ── DroneState ─────────────────────────────────────────────────────────
     def _publish_state(self):
@@ -198,7 +235,18 @@ class ExplorationPlannerNode(Node):
         if not (self._px4_xy_valid and self._px4_z_valid):
             return False
         target_z_ned = -self._hover_alt
-        return abs(self._px4_z_ned - target_z_ned) <= self._hover_ready_tolerance_m
+        px4_ready = abs(self._px4_z_ned - target_z_ned) <= self._hover_ready_tolerance_m
+        lio_ready = abs(self._pos_enu[2] - self._hover_alt) <= self._hover_ready_tolerance_m
+        return px4_ready and lio_ready
+
+    def _assignment_ready(self) -> tuple[bool, str]:
+        if not self._px4_xy_valid or not self._px4_z_valid:
+            return False, 'vehicle pose invalid'
+        if not all(math.isfinite(value) for value in self._pos_enu):
+            return False, 'lio pose invalid'
+        if self._status == _STATUS_TAKING_OFF and not self._flight_ready():
+            return False, 'vehicle still taking off'
+        return True, ''
 
 
 def main():
@@ -210,7 +258,10 @@ def main():
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

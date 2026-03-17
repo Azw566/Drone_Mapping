@@ -59,15 +59,20 @@ def main():
     seq = 0
     print(f'[gcs_heartbeat] Sending HEARTBEAT to {N_INSTANCES} PX4 instance(s) '
           f'on ports {PORTS} at {RATE_HZ} Hz', flush=True)
-    while True:
-        pkt = _heartbeat_bytes(seq)
-        for port in PORTS:
-            try:
-                sock.sendto(pkt, ('127.0.0.1', port))
-            except OSError:
-                pass
-        seq += 1
-        time.sleep(1.0 / RATE_HZ)
+    try:
+        while True:
+            pkt = _heartbeat_bytes(seq)
+            for port in PORTS:
+                try:
+                    sock.sendto(pkt, ('127.0.0.1', port))
+                except OSError:
+                    pass
+            seq += 1
+            time.sleep(1.0 / RATE_HZ)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sock.close()
 
 
 if __name__ == '__main__':

@@ -25,6 +25,7 @@ install(PROGRAMS
   scripts/save_arena_map.py
   scripts/auto_save_arena_map.py
   scripts/gcs_heartbeat.py
+  scripts/fullstack_acceptance.sh
   scripts/wait_for_vio.py
   DESTINATION lib/${PROJECT_NAME}
 )

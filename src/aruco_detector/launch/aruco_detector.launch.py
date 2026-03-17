@@ -35,6 +35,14 @@ def generate_launch_description():
             'aruco_dict_id',
             default_value='0',
             description='OpenCV ArUco dictionary ID (0=DICT_4X4_50)'),
+        DeclareLaunchArgument(
+            'min_confidence',
+            default_value='0.02',
+            description='Minimum detection confidence before publishing a tag'),
+        DeclareLaunchArgument(
+            'max_detection_distance_m',
+            default_value='10.0',
+            description='Maximum range at which detections are accepted'),
 
         Node(
             package='aruco_detector',
@@ -50,6 +58,8 @@ def generate_launch_description():
                 'camera_optical_frame':  [drone_ns, '/camera_optical_frame'],
                 'marker_size':           LaunchConfiguration('marker_size'),
                 'aruco_dict_id':         LaunchConfiguration('aruco_dict_id'),
+                'min_confidence':        LaunchConfiguration('min_confidence'),
+                'max_detection_distance_m': LaunchConfiguration('max_detection_distance_m'),
             }],
         ),
     ])

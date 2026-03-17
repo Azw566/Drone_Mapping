@@ -57,15 +57,22 @@ _OFFBOARD    = 'offboard'
 _TAKING_OFF  = 'taking_off'
 _HOVER       = 'hover'
 _EXPLORING   = 'exploring'
+_INSPECTING  = 'inspecting'
 _LANDING     = 'landing'
 
 # Config
 HOVER_ALT_M      = 1.5    # metres above takeoff (NED z = -HOVER_ALT_M)
 GOAL_RADIUS_M    = 0.5    # consider goal reached when within this distance
+SEARCH_GOAL_RADIUS_M = GOAL_RADIUS_M
 PRE_ARM_SECS     = 2.0    # seconds of publishing before arming
 TAKEOFF_VEL_MS   = 1.5    # vertical climb speed during TAKING_OFF (m/s, NED -z)
 MAX_EXPLORING_STEP_M = 0.08  # cap each horizontal setpoint update to ~0.8 m/s @ 10 Hz
 FACE_GOAL_YAW = False
+GOAL_SCAN_ENABLED = False
+GOAL_SCAN_DURATION_S = 8.0
+GOAL_SCAN_YAWSPEED_RAD_S = 0.6
+HOVER_READY_TOLERANCE_M = 0.5
+INSPECTION_ALTITUDE_M = HOVER_ALT_M
 
 
 class OffboardControllerNode(Node):
@@ -74,16 +81,37 @@ class OffboardControllerNode(Node):
 
         self.declare_parameter('drone_ns', 'd1')
         self.declare_parameter('hover_alt', HOVER_ALT_M)
+        self.declare_parameter('hover_ready_tolerance_m', HOVER_READY_TOLERANCE_M)
+        self.declare_parameter('goal_radius_m', GOAL_RADIUS_M)
+        self.declare_parameter('search_goal_radius_m', SEARCH_GOAL_RADIUS_M)
         self.declare_parameter('max_exploring_step_m', MAX_EXPLORING_STEP_M)
+        self.declare_parameter('inspection_altitude_m', INSPECTION_ALTITUDE_M)
         self.declare_parameter('face_goal_yaw', FACE_GOAL_YAW)
+        self.declare_parameter('goal_scan_enabled', GOAL_SCAN_ENABLED)
+        self.declare_parameter('goal_scan_duration_s', GOAL_SCAN_DURATION_S)
+        self.declare_parameter('goal_scan_yawspeed_rad_s', GOAL_SCAN_YAWSPEED_RAD_S)
 
         ns   = self.get_parameter('drone_ns').get_parameter_value().string_value
         self._ns = ns
         self._hover_alt = self.get_parameter('hover_alt').get_parameter_value().double_value
+        self._hover_ready_tolerance_m = (
+            self.get_parameter('hover_ready_tolerance_m').get_parameter_value().double_value)
+        self._goal_radius_m = (
+            self.get_parameter('goal_radius_m').get_parameter_value().double_value)
+        self._search_goal_radius_m = (
+            self.get_parameter('search_goal_radius_m').get_parameter_value().double_value)
         self._max_exploring_step_m = (
             self.get_parameter('max_exploring_step_m').get_parameter_value().double_value)
+        self._inspection_altitude_m = (
+            self.get_parameter('inspection_altitude_m').get_parameter_value().double_value)
         self._face_goal_yaw = (
             self.get_parameter('face_goal_yaw').get_parameter_value().bool_value)
+        self._goal_scan_enabled = (
+            self.get_parameter('goal_scan_enabled').get_parameter_value().bool_value)
+        self._goal_scan_duration_s = (
+            self.get_parameter('goal_scan_duration_s').get_parameter_value().double_value)
+        self._goal_scan_yawspeed_rad_s = (
+            self.get_parameter('goal_scan_yawspeed_rad_s').get_parameter_value().double_value)
 
         # PX4 QoS
         px4_qos = QoSProfile(
@@ -134,13 +162,19 @@ class OffboardControllerNode(Node):
         self._arm_last_attempt = None         # last time arm command was sent
         self._px4_us     = 0                  # latest PX4 timestamp (µs) from VehicleLocalPosition
         self._auto_start_enabled = True       # only auto-arm once per process
+        self._inspect_started_s = None
+        self._inspection_altitude_override_m = None
         # ── Main control timer (10 Hz) ───────────────────────────────────────
         self.create_timer(0.1, self._control_loop)
 
         self.get_logger().info(
             f'[{ns}] OffboardController ready '
-            f'(hover={self._hover_alt} m, max_step={self._max_exploring_step_m:.2f} m, '
-            f'face_goal_yaw={self._face_goal_yaw})')
+            f'(hover={self._hover_alt} m, hover_tol={self._hover_ready_tolerance_m:.2f} m, '
+            f'goal_radius={self._goal_radius_m:.2f} m, '
+            f'search_goal_radius={self._search_goal_radius_m:.2f} m, '
+            f'max_step={self._max_exploring_step_m:.2f} m, '
+            f'inspection_alt={self._inspection_altitude_m:.2f} m, '
+            f'face_goal_yaw={self._face_goal_yaw}, goal_scan={self._goal_scan_enabled})')
 
     # ── Callbacks ─────────────────────────────────────────────────────────
     def _status_cb(self, msg: VehicleStatus):
@@ -167,6 +201,7 @@ class OffboardControllerNode(Node):
     def _goal_cb(self, msg: Point):
         """Accept a new goal in ENU map frame."""
         self._goal_enu = [msg.x, msg.y, msg.z]
+        self._inspection_altitude_override_m = None
         if self._state == _HOVER:
             self._state = _EXPLORING
             self.get_logger().info(
@@ -175,6 +210,7 @@ class OffboardControllerNode(Node):
     # ── Control loop ──────────────────────────────────────────────────────
     def _control_loop(self):
         now = self.get_clock().now()
+        now_s = now.nanoseconds * 1e-9
 
         if self._state == _IDLE:
             if self._auto_start_enabled and self._home_ned is not None:
@@ -244,9 +280,26 @@ class OffboardControllerNode(Node):
             self._publish_ocm()
             self._publish_goal_setpoint()
             if self._goal_enu is not None and self._at_goal():
-                self._state = _HOVER
+                if self._goal_scan_enabled and self._goal_scan_duration_s > 0.0:
+                    self._state = _INSPECTING
+                    self._inspect_started_s = now_s
+                    self._inspection_altitude_override_m = self._goal_inspection_altitude_m()
+                    self.get_logger().info(f'[{self._ns}] Goal reached → INSPECTING')
+                else:
+                    self._state = _HOVER
+                    self.get_logger().info(f'[{self._ns}] Goal reached → HOVER')
+                    self._inspection_altitude_override_m = None
                 self._goal_enu = None
-                self.get_logger().info(f'[{self._ns}] Goal reached → HOVER')
+
+        elif self._state == _INSPECTING:
+            self._publish_ocm()
+            self._publish_inspection_setpoint(now_s)
+            if (self._inspect_started_s is not None and
+                    (now_s - self._inspect_started_s) >= self._goal_scan_duration_s):
+                self._state = _HOVER
+                self._inspect_started_s = None
+                self._inspection_altitude_override_m = None
+                self.get_logger().info(f'[{self._ns}] Inspection complete → HOVER')
 
         elif self._state == _LANDING:
             self._publish_ocm(velocity_mode=True)
@@ -255,6 +308,8 @@ class OffboardControllerNode(Node):
                 if self._arm_state == 1:   # DISARMED
                     self._state    = _IDLE
                     self._goal_enu = None
+                    self._inspect_started_s = None
+                    self._inspection_altitude_override_m = None
                     self.get_logger().info(f'[{self._ns}] Landed → IDLE')
                 elif (self._arm_last_attempt is None or
                       (now - self._arm_last_attempt).nanoseconds * 1e-9 >= 1.0):
@@ -325,13 +380,28 @@ class OffboardControllerNode(Node):
         if goal_ned is None:
             self._publish_hover_setpoint()
             return
+        search_goal_active = self._goal_requests_tag_scan()
         msg = TrajectorySetpoint()
         msg.timestamp = self._now_us()
         msg.position = [float(goal_ned[0]),
                         float(goal_ned[1]),
                         float(goal_ned[2])]
-        msg.yaw = self._yaw_to_goal() if self._face_goal_yaw else _NAN
-        msg.yawspeed = 0.5 if self._face_goal_yaw else 0.0
+        msg.yaw = self._yaw_to_goal() if (self._face_goal_yaw and search_goal_active) else _NAN
+        msg.yawspeed = 0.5 if (self._face_goal_yaw and search_goal_active) else 0.0
+        self._pub_sp.publish(msg)
+
+    def _publish_inspection_setpoint(self, now_s: float):
+        msg = TrajectorySetpoint()
+        msg.timestamp = self._now_us()
+        p = self._pos_ned
+        inspection_altitude_m = (
+            self._inspection_altitude_override_m
+            if self._inspection_altitude_override_m is not None
+            else self._inspection_altitude_m
+        )
+        msg.position = [float(p[0]), float(p[1]), -inspection_altitude_m]
+        msg.yaw = self._inspection_yaw(now_s)
+        msg.yawspeed = float(self._goal_scan_yawspeed_rad_s)
         self._pub_sp.publish(msg)
 
     def _publish_landing_setpoint(self):
@@ -369,14 +439,19 @@ class OffboardControllerNode(Node):
 
     # ── Geometry helpers ───────────────────────────────────────────────────
     def _at_altitude(self) -> bool:
-        return abs(self._pos_ned[2] - (-self._hover_alt)) < 0.3
+        return abs(self._pos_ned[2] - (-self._hover_alt)) < self._hover_ready_tolerance_m
 
     def _at_goal(self) -> bool:
         if self._goal_enu is None or self._lio_pos_enu is None:
             return False
         dx = self._lio_pos_enu[0] - self._goal_enu[0]
         dy = self._lio_pos_enu[1] - self._goal_enu[1]
-        return math.sqrt(dx*dx + dy*dy) < GOAL_RADIUS_M
+        goal_radius_m = (
+            self._search_goal_radius_m
+            if self._goal_requests_tag_scan()
+            else self._goal_radius_m
+        )
+        return math.sqrt(dx*dx + dy*dy) < goal_radius_m
 
     def _yaw_to_goal(self) -> float:
         goal_delta_ned = self._goal_delta_ned()
@@ -410,6 +485,28 @@ class OffboardControllerNode(Node):
             -self._hover_alt,
         ]
 
+    def _goal_inspection_altitude_m(self) -> float:
+        if self._goal_enu is None:
+            return self._inspection_altitude_m
+        goal_altitude_m = float(self._goal_enu[2])
+        if goal_altitude_m > 0.0:
+            return goal_altitude_m
+        return self._inspection_altitude_m
+
+    def _goal_requests_tag_scan(self) -> bool:
+        if self._goal_enu is None:
+            return False
+        return float(self._goal_enu[2]) > 0.0
+
+    def _inspection_yaw(self, now_s: float) -> float:
+        if self._inspect_started_s is None or self._goal_scan_duration_s <= 0.0:
+            return _NAN
+        progress = max(
+            0.0,
+            min(1.0, (now_s - self._inspect_started_s) / self._goal_scan_duration_s),
+        )
+        return -math.pi + (2.0 * math.pi * progress)
+
 
 
 def main():
@@ -421,7 +518,10 @@ def main():
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

@@ -62,8 +62,10 @@ class POIManagerNode(Node):
         """Insert or update; returns (is_new, total_unique_tags)."""
         tid = msg.tag_id
         is_new = tid not in self._tags
+        should_publish = False
         if is_new or msg.confidence > self._tags[tid].confidence:
             self._tags[tid] = msg
+            should_publish = True
             if is_new:
                 self.get_logger().info(
                     f'[POI] New tag {tid} detected by {msg.detected_by} '
@@ -72,6 +74,8 @@ class POIManagerNode(Node):
                 self.get_logger().debug(
                     f'[POI] Updated tag {tid} — confidence '
                     f'{self._tags[tid].confidence:.2f} → {msg.confidence:.2f}')
+        if should_publish:
+            self._pub.publish(self._tags[tid])
         return is_new, len(self._tags)
 
     # ── Callbacks ──────────────────────────────────────────────────────────
@@ -93,8 +97,6 @@ class POIManagerNode(Node):
     def _publish_all(self):
         ma = MarkerArray()
         for i, det in enumerate(self._tags.values()):
-            self._pub.publish(det)
-
             # Sphere at tag position
             m = Marker()
             m.header          = det.world_pose.header
@@ -137,7 +139,10 @@ def main():
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

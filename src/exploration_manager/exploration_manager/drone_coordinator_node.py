@@ -14,11 +14,13 @@ Safety
 Subscribed
   /{ns}/frontiers/list    drone_interfaces/FrontierList  (per drone)
   /{ns}/drone_state       drone_interfaces/DroneState    (per drone)
+  /poi/detections         drone_interfaces/ArucoDetection (optional)
 
 Service clients
   /{ns}/assign_frontier   drone_interfaces/AssignFrontier
 """
 
+from dataclasses import dataclass
 import math
 import rclpy
 from rclpy.node import Node
@@ -27,10 +29,19 @@ from rclpy.qos import QoSProfile, DurabilityPolicy
 
 from geometry_msgs.msg import Point
 from std_msgs.msg import Bool, Empty
-from drone_interfaces.msg import FrontierList, DroneState
+from drone_interfaces.msg import FrontierList, DroneState, ArucoDetection
 from drone_interfaces.srv import AssignFrontier
 
 _STATUS_IDLE = 'idle'
+_STATUS_EXPLORING = 'exploring'
+
+
+@dataclass
+class _SearchTarget:
+    tag_id: int
+    point: Point
+    label: str
+    last_assigned_s: float = -1.0
 
 
 class DroneCoordinatorNode(Node):
@@ -44,6 +55,15 @@ class DroneCoordinatorNode(Node):
         self.declare_parameter('max_assignment_distance', 15.0)
         self.declare_parameter('min_assignment_distance', 1.5)
         self.declare_parameter('idle_completion_dwell_s', 5.0)
+        self.declare_parameter('enable_poi_search', False)
+        self.declare_parameter('required_tag_ids', '')
+        self.declare_parameter('poi_search_targets', '')
+        self.declare_parameter('poi_search_cooldown_s', 30.0)
+        self.declare_parameter('poi_search_leg_timeout_s', 45.0)
+        self.declare_parameter('poi_search_preempts_frontiers', False)
+        self.declare_parameter('drone_spawn_positions', '')
+        self.declare_parameter('poi_reference_tag_positions', '')
+        self.declare_parameter('max_tag_offset_refine_delta_m', 1.5)
 
         namespaces = (self.get_parameter('drone_namespaces')
                       .get_parameter_value().string_array_value)
@@ -59,7 +79,27 @@ class DroneCoordinatorNode(Node):
                                          .get_parameter_value().double_value)
         self._idle_completion_dwell_s = (self.get_parameter('idle_completion_dwell_s')
                                          .get_parameter_value().double_value)
+        self._enable_poi_search = (self.get_parameter('enable_poi_search')
+                                   .get_parameter_value().bool_value)
+        self._poi_search_cooldown_s = (self.get_parameter('poi_search_cooldown_s')
+                                       .get_parameter_value().double_value)
+        self._poi_search_leg_timeout_s = (self.get_parameter('poi_search_leg_timeout_s')
+                                          .get_parameter_value().double_value)
+        self._poi_search_preempts_frontiers = (
+            self.get_parameter('poi_search_preempts_frontiers')
+            .get_parameter_value().bool_value)
+        self._max_tag_offset_refine_delta_m = (
+            self.get_parameter('max_tag_offset_refine_delta_m')
+            .get_parameter_value().double_value)
         self._namespaces = list(namespaces)
+        self._required_tag_ids = self._parse_required_tag_ids(
+            self.get_parameter('required_tag_ids').get_parameter_value().string_value)
+        self._poi_search_targets = self._parse_search_targets(
+            self.get_parameter('poi_search_targets').get_parameter_value().string_value)
+        self._spawn_world_by_ns = self._parse_namespaced_points(
+            self.get_parameter('drone_spawn_positions').get_parameter_value().string_value)
+        self._tag_world_positions = self._parse_tag_points(
+            self.get_parameter('poi_reference_tag_positions').get_parameter_value().string_value)
 
         # Per-drone state
         self._states:    dict[str, DroneState]    = {}
@@ -70,6 +110,14 @@ class DroneCoordinatorNode(Node):
         self._mission_complete = False
         self._exploration_started = False
         self._no_assignable_since = None
+        self._found_tags: set[int] = set()
+        self._active_poi_search_by_ns: dict[str, _SearchTarget] = {}
+        self._tag_last_assigned_s: dict[int, float] = {}
+        self._map_offset_by_ns: dict[str, tuple[float, float]] = {}
+        self._tag_offset_by_ns: dict[str, dict[int, tuple[float, float]]] = {}
+        self._search_reassignment_due: set[str] = set()
+        self._search_reassignment_anchor_by_ns: dict[str, Point] = {}
+        self._timed_out_search_target_by_ns: dict[str, _SearchTarget] = {}
 
         cbg = ReentrantCallbackGroup()
 
@@ -94,6 +142,10 @@ class DroneCoordinatorNode(Node):
             # the desired "don't block forever" behaviour.
             self._last_frontier_time[ns] = self.get_clock().now().nanoseconds * 1e-9
 
+        if self._enable_poi_search:
+            self.create_subscription(
+                ArucoDetection, '/poi/detections', self._poi_cb, 10)
+
         # Latched publisher for mission-complete signal
         _latch = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._pub_mission_complete = self.create_publisher(Bool, '/mission_complete', _latch)
@@ -101,16 +153,40 @@ class DroneCoordinatorNode(Node):
         # Coordination loop at 1 Hz
         self.create_timer(1.0, self._coordinate, callback_group=cbg)
 
+        search_summary = ''
+        if self._enable_poi_search:
+            search_summary = (
+                f' | poi_search tags={sorted(self._required_tag_ids)} '
+                f'targets={len(self._poi_search_targets)}')
         self.get_logger().info(
-            f'DroneCoordinator managing: {self._namespaces}')
+            f'DroneCoordinator managing: {self._namespaces}{search_summary}')
 
     # ── Callbacks ──────────────────────────────────────────────────────────
     def _state_cb(self, ns: str, msg: DroneState):
         self._states[ns] = msg
+        self._maybe_bootstrap_map_offset(ns, msg)
+        if msg.status == _STATUS_IDLE:
+            self._active_poi_search_by_ns.pop(ns, None)
+            self._search_reassignment_anchor_by_ns.pop(ns, None)
+            self._timed_out_search_target_by_ns.pop(ns, None)
 
     def _frontier_cb(self, ns: str, msg: FrontierList):
         self._frontiers[ns] = msg
         self._last_frontier_time[ns] = self.get_clock().now().nanoseconds * 1e-9
+
+    def _poi_cb(self, msg: ArucoDetection):
+        tag_id = int(msg.tag_id)
+        self._found_tags.add(tag_id)
+        ns = str(msg.detected_by).strip()
+        self._maybe_refine_map_offset_from_tag(ns, tag_id, msg)
+        for drone_ns, target in list(self._active_poi_search_by_ns.items()):
+            if target.tag_id == tag_id:
+                self._search_reassignment_anchor_by_ns[drone_ns] = (
+                    self._copy_point(self._search_target_point_in_map(drone_ns, target)))
+                self._active_poi_search_by_ns.pop(drone_ns, None)
+                self._timed_out_search_target_by_ns.pop(drone_ns, None)
+                if self._required_tag_ids - self._found_tags:
+                    self._search_reassignment_due.add(drone_ns)
 
     # ── Coordination ───────────────────────────────────────────────────────
     def _coordinate(self):
@@ -118,6 +194,24 @@ class DroneCoordinatorNode(Node):
             return
 
         now_s = self.get_clock().now().nanoseconds * 1e-9
+        missing_tags = self._required_tag_ids - self._found_tags
+
+        for ns, target in list(self._active_poi_search_by_ns.items()):
+            if ns in self._search_reassignment_due:
+                continue
+            if target.tag_id not in missing_tags:
+                continue
+            if target.last_assigned_s < 0.0:
+                continue
+            if (now_s - target.last_assigned_s) < self._poi_search_leg_timeout_s:
+                continue
+            self._search_reassignment_due.add(ns)
+            self._search_reassignment_anchor_by_ns[ns] = (
+                self._copy_point(self._search_target_point_in_map(ns, target)))
+            self._timed_out_search_target_by_ns[ns] = target
+            self.get_logger().info(
+                f'[coordinator] {ns} POI search tag {target.tag_id} timed out '
+                f'— trying an alternate viewpoint')
 
         # Low-battery check: trigger landing for any drone below threshold
         for ns, state in self._states.items():
@@ -144,10 +238,11 @@ class DroneCoordinatorNode(Node):
         no_frontiers = all(
             (now_s - self._last_frontier_time[ns]) > self._no_frontier_timeout
             for ns in self._namespaces)
-        no_assignable_frontiers = all_idle and all_reported and all(
-            self._pick_best_frontier(ns, self._states[ns], [], now_s) is None
+        no_assignable_work = all_idle and all_reported and all(
+            self._pick_best_frontier(ns, self._states[ns], [], now_s) is None and
+            self._pick_best_poi_search_target(ns, self._states[ns], [], now_s) is None
             for ns in self._namespaces)
-        if no_assignable_frontiers and self._exploration_started:
+        if no_assignable_work and self._exploration_started:
             if self._no_assignable_since is None:
                 self._no_assignable_since = now_s
         else:
@@ -156,7 +251,12 @@ class DroneCoordinatorNode(Node):
             self._exploration_started and
             self._no_assignable_since is not None and
             (now_s - self._no_assignable_since) >= self._idle_completion_dwell_s)
-        if all_idle and (all_frontiers_empty or no_frontiers or idle_completion_ready):
+        all_required_tags_found = (
+            not self._enable_poi_search or
+            not self._required_tag_ids or
+            not missing_tags)
+        if all_idle and all_required_tags_found and (
+                all_frontiers_empty or no_frontiers or idle_completion_ready):
             self._mission_complete = True
             self.get_logger().info('[coordinator] Mission complete — all frontiers exhausted')
             self._pub_mission_complete.publish(Bool(data=True))
@@ -165,22 +265,73 @@ class DroneCoordinatorNode(Node):
             return
 
         # Build list of currently claimed goal centroids (one per non-idle drone)
-        claimed: list[Point] = []
+        claimed_by_ns: dict[str, Point] = {}
+        claimed_search_tag_ids = {
+            target.tag_id
+            for other_ns, target in self._active_poi_search_by_ns.items()
+            if other_ns not in self._search_reassignment_due
+        }
         for ns, state in self._states.items():
-            if state.status != _STATUS_IDLE:
-                claimed.append(state.current_goal)
+            if state.status != _STATUS_IDLE and ns not in self._search_reassignment_due:
+                claimed_by_ns[ns] = state.current_goal
 
         for ns in self._namespaces:
             state = self._states.get(ns)
-            if state is None or state.status != _STATUS_IDLE:
+            search_reassign_due = ns in self._search_reassignment_due
+            if state is None:
+                continue
+            if state.status != _STATUS_IDLE and not search_reassign_due:
                 continue  # drone not idle — skip
 
             # Skip drones with low battery (they are landing)
             if state.battery_percent < self._low_bat_threshold:
                 continue
 
-            best = self._pick_best_frontier(ns, state, claimed, now_s)
+            other_claimed = [
+                point for other_ns, point in claimed_by_ns.items()
+                if other_ns != ns
+            ]
+            assignment_label = 'frontier'
+            search_target = None
+            best = None
+            retry_target = self._timed_out_search_target_by_ns.get(ns)
+            prefer_poi_search = (
+                self._enable_poi_search and
+                (self._poi_search_preempts_frontiers or search_reassign_due) and
+                bool(missing_tags)
+            )
+            if prefer_poi_search:
+                search_target = self._pick_best_poi_search_target(
+                    ns,
+                    state,
+                    other_claimed,
+                    now_s,
+                    retry_target=retry_target,
+                    claimed_tag_ids=claimed_search_tag_ids,
+                )
+                if search_target is not None:
+                    best = self._search_target_point_in_map(ns, search_target)
+                    search_target.last_assigned_s = now_s
+                    assignment_label = f'POI search tag {search_target.tag_id}'
             if best is None:
+                best = self._pick_best_frontier(ns, state, other_claimed, now_s)
+            if best is None and not prefer_poi_search:
+                search_target = self._pick_best_poi_search_target(
+                    ns,
+                    state,
+                    other_claimed,
+                    now_s,
+                    claimed_tag_ids=claimed_search_tag_ids,
+                )
+                if search_target is not None:
+                    best = self._search_target_point_in_map(ns, search_target)
+                    search_target.last_assigned_s = now_s
+                    assignment_label = f'POI search tag {search_target.tag_id}'
+            if best is None:
+                if search_reassign_due:
+                    self._search_reassignment_due.discard(ns)
+                    self._search_reassignment_anchor_by_ns.pop(ns, None)
+                    self._timed_out_search_target_by_ns.pop(ns, None)
                 continue
 
             if not self._assign_clients[ns].service_is_ready():
@@ -191,11 +342,14 @@ class DroneCoordinatorNode(Node):
             req.frontier_centroid  = best
             future = self._assign_clients[ns].call_async(req)
             future.add_done_callback(
-                lambda f, n=ns, g=best: self._assignment_done(n, g, f))
+                lambda f, n=ns, g=best, l=assignment_label, t=search_target:
+                    self._assignment_done(n, g, l, t, f))
 
             # Optimistically claim this goal now so a second idle drone
             # does not race to the same frontier in this same tick
-            claimed.append(best)
+            claimed_by_ns[ns] = best
+            if search_target is not None:
+                claimed_search_tag_ids.add(search_target.tag_id)
 
     def _pick_best_frontier(self,
                             ns: str,
@@ -234,22 +388,350 @@ class DroneCoordinatorNode(Node):
 
         return best_centroid
 
+    def _pick_best_poi_search_target(self,
+                                     ns: str,
+                                     state: DroneState,
+                                     claimed: list[Point],
+                                     now_s: float,
+                                     retry_target: _SearchTarget | None = None,
+                                     claimed_tag_ids: set[int] | None = None) -> _SearchTarget | None:
+        if not self._enable_poi_search or not self._poi_search_targets:
+            return None
+
+        missing_tags = self._required_tag_ids - self._found_tags
+        if not missing_tags:
+            return None
+        if claimed_tag_ids is None:
+            claimed_tag_ids = set()
+
+        anchor = self._search_reassignment_anchor_by_ns.get(ns)
+        if anchor is None:
+            drone_x = state.current_pose.pose.position.x
+            drone_y = state.current_pose.pose.position.y
+        else:
+            drone_x = anchor.x
+            drone_y = anchor.y
+        anchor_side = self._side_bucket(drone_x)
+        active_tag_ids = {
+            target.tag_id
+            for other_ns, target in self._active_poi_search_by_ns.items()
+            if other_ns != ns
+        }
+
+        if retry_target is not None and retry_target.tag_id in missing_tags:
+            retry_pick = self._pick_search_target_for_tag(
+                ns,
+                retry_target.tag_id,
+                drone_x,
+                drone_y,
+                claimed,
+                now_s,
+                anchor_side,
+                allow_opposite_side=True,
+                exclude_label=retry_target.label,
+            )
+            if retry_pick is not None:
+                return retry_pick[0]
+
+        for skip_active_tags in (True, False):
+            side_passes = [True] if anchor_side == 0 else [False, True]
+            for allow_opposite_side in side_passes:
+                best_priority = None
+                best_target = None
+                for tag_id in sorted(missing_tags):
+                    if skip_active_tags and tag_id in active_tag_ids:
+                        continue
+                    if tag_id in claimed_tag_ids and (
+                            retry_target is None or tag_id != retry_target.tag_id):
+                        continue
+
+                    candidate = self._pick_search_target_for_tag(
+                        ns,
+                        tag_id,
+                        drone_x,
+                        drone_y,
+                        claimed,
+                        now_s,
+                        anchor_side,
+                        allow_opposite_side=allow_opposite_side,
+                    )
+                    if candidate is None:
+                        continue
+                    nearest_target, nearest_distance = candidate
+
+                    tag_world_point = self._tag_world_positions.get(tag_id)
+                    tag_side = self._side_bucket(
+                        tag_world_point.x if tag_world_point is not None else nearest_target.point.x)
+                    side_priority = 0
+                    if anchor_side != 0:
+                        if tag_side == anchor_side:
+                            side_priority = 2
+                        elif tag_side == 0:
+                            side_priority = 1
+                    last_assigned_s = self._tag_last_assigned_s.get(tag_id, -1.0)
+                    priority = (
+                        side_priority,
+                        1 if last_assigned_s < 0.0 else 0,
+                        0.0 if last_assigned_s < 0.0 else (now_s - last_assigned_s),
+                        -nearest_distance,
+                        -float(tag_id),
+                    )
+                    if best_priority is None or priority > best_priority:
+                        best_priority = priority
+                        best_target = nearest_target
+
+                if best_target is not None:
+                    return best_target
+
+        return None
+
+    def _pick_search_target_for_tag(self,
+                                    ns: str,
+                                    tag_id: int,
+                                    drone_x: float,
+                                    drone_y: float,
+                                    claimed: list[Point],
+                                    now_s: float,
+                                    anchor_side: int,
+                                    allow_opposite_side: bool,
+                                    exclude_label: str | None = None
+                                    ) -> tuple[_SearchTarget, float] | None:
+        nearest_target = None
+        nearest_distance = None
+        for target in self._poi_search_targets:
+            if target.tag_id != tag_id:
+                continue
+            if exclude_label is not None and target.label == exclude_label:
+                continue
+            if (now_s - target.last_assigned_s) < self._poi_search_cooldown_s:
+                continue
+            map_point = self._search_target_point_in_map(ns, target)
+            if any(self._dist(map_point, c) < self._safety_radius for c in claimed):
+                continue
+            candidate_side = self._side_bucket(map_point.x)
+            if (anchor_side != 0 and not allow_opposite_side and
+                    candidate_side not in (0, anchor_side)):
+                continue
+
+            distance = math.hypot(
+                map_point.x - drone_x,
+                map_point.y - drone_y,
+            )
+            if nearest_distance is None or distance < nearest_distance:
+                nearest_distance = distance
+                nearest_target = target
+
+        if nearest_target is None or nearest_distance is None:
+            return None
+        return nearest_target, nearest_distance
+
+    def _search_target_point_in_map(self, ns: str, target: _SearchTarget) -> Point:
+        point = Point()
+        offset = self._map_offset_by_ns.get(ns)
+        if offset is None:
+            point.x = target.point.x
+            point.y = target.point.y
+        else:
+            point.x = target.point.x + offset[0]
+            point.y = target.point.y + offset[1]
+        point.z = target.point.z
+        return point
+
+    def _maybe_bootstrap_map_offset(self, ns: str, msg: DroneState):
+        if ns in self._map_offset_by_ns:
+            return
+        spawn = self._spawn_world_by_ns.get(ns)
+        if spawn is None:
+            return
+        pose = msg.current_pose.pose.position
+        self._map_offset_by_ns[ns] = (
+            float(pose.x - spawn.x),
+            float(pose.y - spawn.y),
+        )
+        self.get_logger().info(
+            f'[coordinator] {ns} map offset bootstrapped '
+            f'Δx={self._map_offset_by_ns[ns][0]:.2f} '
+            f'Δy={self._map_offset_by_ns[ns][1]:.2f}')
+
+    def _maybe_refine_map_offset_from_tag(self, ns: str, tag_id: int, msg: ArucoDetection):
+        if not ns:
+            return
+        world_point = self._tag_world_positions.get(tag_id)
+        if world_point is None:
+            return
+        observed = msg.world_pose.pose.position
+        observed_offset = (
+            float(observed.x - world_point.x),
+            float(observed.y - world_point.y),
+        )
+        current_offset = self._map_offset_by_ns.get(ns)
+        if current_offset is not None and self._max_tag_offset_refine_delta_m > 0.0:
+            delta = math.hypot(
+                observed_offset[0] - current_offset[0],
+                observed_offset[1] - current_offset[1],
+            )
+            if delta > self._max_tag_offset_refine_delta_m:
+                self.get_logger().warn(
+                    f'[coordinator] Ignoring tag {tag_id} offset update for {ns} '
+                    f'(Δ={delta:.2f} m > {self._max_tag_offset_refine_delta_m:.2f} m)')
+                return
+        per_ns = self._tag_offset_by_ns.setdefault(ns, {})
+        per_ns[tag_id] = observed_offset
+        samples = list(per_ns.values())
+        avg_dx = sum(sample[0] for sample in samples) / len(samples)
+        avg_dy = sum(sample[1] for sample in samples) / len(samples)
+        self._map_offset_by_ns[ns] = (avg_dx, avg_dy)
+        self.get_logger().info(
+            f'[coordinator] {ns} map offset refined from tag {tag_id} '
+            f'→ Δx={avg_dx:.2f} Δy={avg_dy:.2f}')
+
+    def _defer_active_search_retry(self, ns: str):
+        active_target = self._active_poi_search_by_ns.get(ns)
+        if active_target is None:
+            return
+        active_target.last_assigned_s = self.get_clock().now().nanoseconds * 1e-9
+
     @staticmethod
     def _dist(a: Point, b: Point) -> float:
         return math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2)
 
-    def _assignment_done(self, ns: str, goal: Point, future):
+    @staticmethod
+    def _copy_point(src: Point) -> Point:
+        point = Point()
+        point.x = float(src.x)
+        point.y = float(src.y)
+        point.z = float(src.z)
+        return point
+
+    @staticmethod
+    def _side_bucket(x: float) -> int:
+        if x > 2.0:
+            return 1
+        if x < -2.0:
+            return -1
+        return 0
+
+    @staticmethod
+    def _parse_required_tag_ids(raw: str) -> set[int]:
+        return {
+            int(token.strip()) for token in raw.split(',')
+            if token.strip()
+        }
+
+    def _parse_search_targets(self, raw: str) -> list[_SearchTarget]:
+        targets = []
+        for idx, token in enumerate(raw.split(';')):
+            token = token.strip()
+            if not token:
+                continue
+            parts = [part.strip() for part in token.split(':')]
+            if len(parts) not in (3, 4):
+                self.get_logger().warn(
+                    f'[coordinator] Ignoring malformed poi_search_targets entry: {token}')
+                continue
+            try:
+                tag_id = int(parts[0])
+                x = float(parts[1])
+                y = float(parts[2])
+                z = float(parts[3]) if len(parts) == 4 else 0.0
+            except ValueError:
+                self.get_logger().warn(
+                    f'[coordinator] Ignoring non-numeric poi_search_targets entry: {token}')
+                continue
+            point = Point()
+            point.x = x
+            point.y = y
+            point.z = z
+            targets.append(_SearchTarget(tag_id=tag_id, point=point, label=f'target_{idx}'))
+        return targets
+
+    def _parse_namespaced_points(self, raw: str) -> dict[str, Point]:
+        points = {}
+        for token in raw.split(';'):
+            token = token.strip()
+            if not token:
+                continue
+            parts = [part.strip() for part in token.split(':')]
+            if len(parts) != 3:
+                self.get_logger().warn(
+                    f'[coordinator] Ignoring malformed drone_spawn_positions entry: {token}')
+                continue
+            ns = parts[0]
+            try:
+                x = float(parts[1])
+                y = float(parts[2])
+            except ValueError:
+                self.get_logger().warn(
+                    f'[coordinator] Ignoring non-numeric drone_spawn_positions entry: {token}')
+                continue
+            point = Point()
+            point.x = x
+            point.y = y
+            points[ns] = point
+        return points
+
+    def _parse_tag_points(self, raw: str) -> dict[int, Point]:
+        points = {}
+        for token in raw.split(';'):
+            token = token.strip()
+            if not token:
+                continue
+            parts = [part.strip() for part in token.split(':')]
+            if len(parts) != 3:
+                self.get_logger().warn(
+                    f'[coordinator] Ignoring malformed poi_reference_tag_positions entry: {token}')
+                continue
+            try:
+                tag_id = int(parts[0])
+                x = float(parts[1])
+                y = float(parts[2])
+            except ValueError:
+                self.get_logger().warn(
+                    f'[coordinator] Ignoring non-numeric poi_reference_tag_positions entry: {token}')
+                continue
+            point = Point()
+            point.x = x
+            point.y = y
+            points[tag_id] = point
+        return points
+
+    def _assignment_done(self,
+                         ns: str,
+                         goal: Point,
+                         label: str,
+                         search_target: _SearchTarget | None,
+                         future):
         try:
             res = future.result()
             if res.accepted:
                 self._exploration_started = True
+                if search_target is not None:
+                    self._tag_last_assigned_s[search_target.tag_id] = search_target.last_assigned_s
+                    self._active_poi_search_by_ns[ns] = search_target
+                else:
+                    self._active_poi_search_by_ns.pop(ns, None)
+                self._search_reassignment_due.discard(ns)
+                self._search_reassignment_anchor_by_ns.pop(ns, None)
+                self._timed_out_search_target_by_ns.pop(ns, None)
                 self.get_logger().info(
-                    f'[coordinator] {ns} accepted frontier '
+                    f'[coordinator] {ns} accepted {label} '
                     f'({goal.x:.1f}, {goal.y:.1f})')
             else:
+                if search_target is not None:
+                    search_target.last_assigned_s = -1.0
+                    self._defer_active_search_retry(ns)
+                self._search_reassignment_due.discard(ns)
+                self._search_reassignment_anchor_by_ns.pop(ns, None)
+                self._timed_out_search_target_by_ns.pop(ns, None)
                 self.get_logger().warn(
                     f'[coordinator] {ns} rejected: {res.reason}')
         except Exception as e:
+            if search_target is not None:
+                search_target.last_assigned_s = -1.0
+                self._defer_active_search_retry(ns)
+            self._search_reassignment_due.discard(ns)
+            self._search_reassignment_anchor_by_ns.pop(ns, None)
+            self._timed_out_search_target_by_ns.pop(ns, None)
             self.get_logger().error(f'[coordinator] assign call failed: {e}')
 
 
@@ -262,7 +744,10 @@ def main():
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
